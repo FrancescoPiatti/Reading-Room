@@ -1,0 +1,29 @@
+{
+  "field": "econ-finance",
+  "label": "Economics & finance",
+  "tags": [
+    "asset-pricing",
+    "market-microstructure",
+    "risk",
+    "econometrics",
+    "macroeconomics",
+    "derivatives",
+    "corporate-finance",
+    "theory",
+    "empirics",
+    "reproducibility"
+  ],
+  "max_tags": 4,
+  "sections": [
+    {"key": "summary", "title": "Summary"},
+    {"key": "math", "title": "Maths"},
+    {"key": "architecture", "title": "Methodology"},
+    {"key": "results", "title": "Results"},
+    {"key": "significance", "title": "Significance & limitations"},
+    {"key": "reproducibility", "title": "Data & reproducibility"}
+  ],
+  "required_sections": ["summary", "significance"],
+  "lens": "the model / identification strategy, its assumptions, and the maths behind it — over-invest here",
+  "lens_key": "math",
+  "tone": "assume an economist; state assumptions and identification clearly; LaTeX for formal results"
+}

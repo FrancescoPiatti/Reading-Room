@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE_TEXT}} — {{SITE_TITLE}}</title>
+<script>
+  /* set theme before paint to avoid a flash of the wrong theme; light is default */
+  (function () {
+    try { if (localStorage.getItem('rr-theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark'); } catch (e) {}
+  })();
+</script>
+<style>
+/* fonts are self-hosted (../../assets/fonts/, via the inlined @font-face rules below) */
+{{BASE_CSS}}
+</style>
+</head>
+<body class="report">
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="back" href="../../index.html">← {{SITE_TITLE}}</a>
+    <button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle light / dark theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="wrap">
+  <header>
+    <p class="eyebrow">{{EYEBROW}}</p>
+    <h1 class="title">{{TITLE_TEXT}}</h1>
+    <p class="byline">{{AUTHORS}}</p>
+    <p class="meta-line">{{META_LINE}}</p>
+    <p class="lead">{{LEAD}}</p>
+    <div class="tags">{{TAGS}}</div>
+    <div class="actions">{{STATUS_BADGE}}{{CITE}}</div>
+    <div class="rr-ctags" id="rr-ctags" aria-label="Your collections / custom tags"></div>
+  </header>
+
+  <nav class="tabs" role="tablist" aria-label="Focus views">
+    {{TABS}}
+  </nav>
+
+  {{PANELS}}
+
+  {{APPENDIX}}
+
+  <footer class="foot">
+    <a class="back" href="../../index.html">← {{SITE_TITLE}}</a>
+    <span>added {{ADDED}}</span>
+  </footer>
+</main>
+
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+    options: { skipHtmlTags: ['script','noscript','style','textarea','pre','code'] }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js"
+        integrity="sha384-Wuix6BuhrWbjDBs24bXrjf4ZQ5aFeFWBuKkFekO2t8xFU0iNaLQfp2K6/1Nxveei"
+        crossorigin="anonymous" id="MathJax-script" async></script>
+<!-- MathJax stays on its pinned, integrity-checked CDN (it is several MB with fonts);
+     offline, LaTeX degrades to readable \( … \) source instead of breaking the page -->
+
+<script>
+  // warn once if browser storage writes fail (quota full / private mode) — otherwise
+  // status, priority, and collection edits would silently not persist
+  var rrLsWarned = false;
+  function rrLsWarn() {
+    if (rrLsWarned) return; rrLsWarned = true;
+    var n = document.createElement('div'); n.className = 'rr-lswarn'; n.setAttribute('role', 'status');
+    n.textContent = 'Couldn’t save to browser storage (full or blocked) — this change may not persist.';
+    document.body.appendChild(n); setTimeout(function () { n.remove(); }, 6000);
+  }
+
+  (function () {
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab'));
+    var panels = Array.prototype.slice.call(document.querySelectorAll('.panel'));
+    function select(i) {
+      tabs.forEach(function (t, j) {
+        t.setAttribute('aria-selected', j === i ? 'true' : 'false');
+        t.tabIndex = j === i ? 0 : -1;
+      });
+      panels.forEach(function (p, j) { p.classList.toggle('is-active', j === i); });
+    }
+    tabs.forEach(function (t, i) {
+      t.addEventListener('click', function () { select(i); });
+      t.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          var n = (i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+          tabs[n].focus(); select(n);
+        }
+      });
+    });
+    if (tabs.length) select(0);
+  })();
+
+  // cite — copy BibTeX to clipboard and reveal the entry
+  (function () {
+    var btn = document.querySelector('.cite-btn');
+    var box = document.querySelector('.cite-box');
+    if (!btn || !box) return;
+    btn.addEventListener('click', function () {
+      var open = box.hidden;
+      box.hidden = !open;
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) {
+        var text = box.innerText;
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(function () {
+            var label = btn.textContent; btn.textContent = 'Copied ✓';
+            setTimeout(function () { btn.textContent = label; }, 1400);
+          }, function () {});
+        }
+      }
+    });
+  })();
+
+  // reading status + priority editor — persists to localStorage (per browser)
+  (function () {
+    var el = document.querySelector('.statusedit');
+    if (!el) return;
+    var id = el.dataset.id;
+    var STATUSES = [['to-read', 'To read'], ['reading', 'Reading'], ['read', 'Read']];
+    function get(key, fallback) { try { var v = localStorage.getItem(key); return v === null ? fallback : v; } catch (e) { return fallback; } }
+    function set(key, val) { try { localStorage.setItem(key, val); } catch (e) { rrLsWarn(); } }
+    function status() { return get('rr-status-' + id, el.dataset.status || 'to-read'); }
+    function prio() { return parseInt(get('rr-prio-' + id, el.dataset.prio || '0'), 10) || 0; }
+    function render() {
+      var st = status(), pr = prio();
+      var segs = STATUSES.map(function (s) {
+        return '<button type="button" class="seg" data-s="' + s[0] + '" aria-pressed="' + (s[0] === st) + '">' + s[1] + '</button>';
+      }).join('');
+      var stars = '';
+      for (var i = 1; i <= 3; i++) stars += '<button type="button" class="star' + (i <= pr ? ' on' : '') + '" data-p="' + i + '" aria-label="set priority ' + i + '">★</button>';
+      el.innerHTML = '<span class="statusseg" role="group" aria-label="Reading status">' + segs + '</span>'
+        + '<span class="starrate" role="group" aria-label="Priority">' + stars + '</span>';
+    }
+    el.addEventListener('click', function (e) {
+      var s = e.target.closest('[data-s]'), p = e.target.closest('[data-p]');
+      if (s) { set('rr-status-' + id, s.dataset.s); render(); }
+      else if (p) { var v = parseInt(p.dataset.p, 10); if (prio() === v) v = 0; set('rr-prio-' + id, v); render(); }
+    });
+    render();
+  })();
+
+  // custom tags / collections editor — user-owned, stored per paper in localStorage
+  // (rr-tags-<id>), the same set the Library groups + exports BibTeX by.
+  (function () {
+    var host = document.getElementById('rr-ctags');
+    var se = document.querySelector('.statusedit');
+    if (!host || !se) return;
+    var id = se.dataset.id;
+    function esc(s){ return String(s).replace(/[&<>"]/g, function (c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+    function get(){ try { var v = JSON.parse(localStorage.getItem('rr-tags-' + id) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+    function save(a){ var u = [], seen = {}; a.map(function (t){ return String(t).trim(); }).filter(Boolean).forEach(function (t){ if (!seen[t.toLowerCase()]) { seen[t.toLowerCase()] = 1; u.push(t); } }); try { localStorage.setItem('rr-tags-' + id, JSON.stringify(u)); } catch (e) { rrLsWarn(); } }
+    function render(){
+      var chips = get().map(function (t){
+        return '<span class="rr-ctag">' + esc(t) + '<button type="button" class="rr-ctag-x" data-t="' + esc(t) + '" aria-label="Remove tag ' + esc(t) + '">×</button></span>';
+      }).join('');
+      host.innerHTML = '<span class="rr-ctags-label">Collections</span>' + chips
+        + '<input class="rr-ctag-add" type="text" placeholder="+ tag" aria-label="Add a custom tag">';
+      host.querySelectorAll('.rr-ctag-x').forEach(function (b){
+        b.addEventListener('click', function (){ save(get().filter(function (x){ return x !== b.dataset.t; })); render(); });
+      });
+      var inp = host.querySelector('.rr-ctag-add');
+      inp.addEventListener('keydown', function (e){ if (e.key === 'Enter' && inp.value.trim()) { var a = get(); a.push(inp.value.trim()); save(a); render(); } });
+    }
+    render();
+  })();
+
+  // theme toggle — persists to localStorage, light is default
+  (function () {
+    var root = document.documentElement;
+    var btn = document.querySelector('.theme-toggle');
+    if (!btn) return;
+    function sync() { btn.setAttribute('aria-pressed', root.getAttribute('data-theme') === 'dark' ? 'true' : 'false'); }
+    sync();
+    btn.addEventListener('click', function () {
+      var dark = root.getAttribute('data-theme') === 'dark';
+      if (dark) { root.removeAttribute('data-theme'); } else { root.setAttribute('data-theme', 'dark'); }
+      try { localStorage.setItem('rr-theme', dark ? 'light' : 'dark'); } catch (e) {}
+      sync();
+    });
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "field": "engineering",
+  "label": "Engineering",
+  "tags": [
+    "control-systems",
+    "signal-processing",
+    "robotics",
+    "optimization",
+    "materials",
+    "simulation",
+    "methods",
+    "theory",
+    "efficiency",
+    "reproducibility"
+  ],
+  "max_tags": 4,
+  "sections": [
+    {"key": "summary", "title": "Summary"},
+    {"key": "math", "title": "Maths"},
+    {"key": "architecture", "title": "Methodology"},
+    {"key": "results", "title": "Results"},
+    {"key": "significance", "title": "Significance & limitations"},
+    {"key": "reproducibility", "title": "Reproducibility"}
+  ],
+  "required_sections": ["summary", "significance"],
+  "lens": "the methodology / design and the maths and derivations behind it — over-invest here",
+  "lens_key": "math",
+  "tone": "assume an engineer; define methods and notation; LaTeX for derivations; report units"
+}

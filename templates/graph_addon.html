@@ -1,0 +1,293 @@
+<!-- ===========================================================================
+  graph_addon.html  —  ghost-node suggestion actions for the connections graph.
+
+  PURELY ADDITIVE. build.py injects this snippet at the end of the page body in
+  docs/graph.html IF this file exists (render_graph). It never edits the graph
+  template, and it leaves the graph's existing behavior untouched except for one
+  thing: a click on a *ghost* node (a referenced-but-not-yet-analyzed paper) now
+  opens a small action popover instead of jumping straight to arXiv. Solid
+  (analyzed) paper nodes are not touched — they still open their report.
+
+  Each ghost offers three actions:
+    • Analyze  — in work mode (server present), run /explain-paper in the
+                 integrated terminal; otherwise copy the command + link arXiv.
+    • Dismiss  — in work mode, persist to dismissed.json (server) + rebuild;
+                 otherwise hide it in this browser (localStorage) + show how to
+                 persist it. Either way the build honors dismissed.json on rebuild.
+    • Keep     — do nothing (the default); just closes the popover.
+
+  Work-mode hooks (window.RR_WORKMODE / RR_runInTerminal / RR_dismissGhost) are
+  provided by the local server's injected client (Phases 3–4). When absent — the
+  static site and GitHub Pages — every action degrades gracefully.
+
+  Styling uses ONLY the existing base.css tokens, so it themes light/dark for free.
+=========================================================================== -->
+<style>
+  .rr-ghost-pop{
+    position:fixed; z-index:9999; min-width:184px; max-width:264px;
+    background:var(--bg-card); border:1px solid var(--line); border-radius:10px;
+    box-shadow:var(--shadow-card); padding:8px; display:none; font-family:var(--sans);
+  }
+  .rr-ghost-pop.show{ display:block; }
+  .rr-pop-title{
+    font-family:var(--mono); font-size:11px; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--ink-faint); padding:4px 6px 8px; margin-bottom:6px;
+    border-bottom:1px solid var(--line);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .rr-pop-act{
+    display:block; width:100%; text-align:left; appearance:none; cursor:pointer;
+    font-family:var(--mono); font-size:12.5px; color:var(--ink);
+    background:var(--bg-card); border:1px solid transparent; border-radius:7px;
+    padding:7px 9px; margin:2px 0; transition:border-color .15s ease, background .15s ease;
+  }
+  .rr-pop-act:hover{ border-color:var(--accent); }
+  .rr-pop-act:focus-visible{ outline:2px solid var(--link); outline-offset:2px; }
+  .rr-pop-act .rr-sub{
+    display:block; font-family:var(--sans); font-size:11px; color:var(--ink-faint); margin-top:2px;
+  }
+  .rr-pop-hint{
+    font-family:var(--mono); font-size:11.5px; color:var(--ink-soft);
+    background:var(--bg-raised); border:1px solid var(--line); border-radius:7px;
+    padding:7px 8px; margin-top:6px; word-break:break-word; line-height:1.45;
+  }
+  .rr-pop-hint b{ color:var(--ink); font-weight:500; }
+  .rr-pop-hint a{ color:var(--link); }
+
+  .rr-toast{
+    position:fixed; left:50%; bottom:22px; transform:translateX(-50%);
+    z-index:9999; display:none; align-items:center; gap:12px;
+    background:var(--bg-card); border:1px solid var(--line); border-radius:999px;
+    box-shadow:var(--shadow-card); padding:8px 8px 8px 16px;
+    font-family:var(--mono); font-size:12.5px; color:var(--ink); max-width:90vw;
+  }
+  .rr-toast.show{ display:flex; }
+  .rr-toast .rr-toast-msg{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .rr-toast .rr-toast-act{
+    appearance:none; cursor:pointer; font-family:var(--mono); font-size:12px;
+    color:var(--bg); background:var(--accent); border:1px solid var(--accent);
+    border-radius:999px; padding:5px 13px; flex:none;
+  }
+  .rr-toast .rr-toast-act:focus-visible{ outline:2px solid var(--link); outline-offset:2px; }
+
+  /* per-row actions trigger in the reading queue */
+  .rr-q-act{
+    margin-left:auto; flex:none; appearance:none; cursor:pointer;
+    font-family:var(--mono); font-size:15px; line-height:1; letter-spacing:1px;
+    color:var(--ink-faint); background:transparent;
+    border:1px solid transparent; border-radius:7px; padding:2px 9px;
+    transition:border-color .15s ease, color .15s ease;
+  }
+  .rr-q-act:hover{ color:var(--ink); border-color:var(--accent); }
+  .rr-q-act:focus-visible{ outline:2px solid var(--link); outline-offset:2px; }
+</style>
+
+<div class="rr-ghost-pop" id="rr-ghost-pop" role="menu" aria-label="Ghost reference actions" hidden>
+  <div class="rr-pop-title"></div>
+  <button type="button" class="rr-pop-act" data-act="analyze" role="menuitem">
+    Analyze<span class="rr-sub">read it into your library</span>
+  </button>
+  <button type="button" class="rr-pop-act" data-act="dismiss" role="menuitem">
+    Dismiss<span class="rr-sub">stop suggesting this reference</span>
+  </button>
+  <button type="button" class="rr-pop-act" data-act="keep" role="menuitem">
+    Keep<span class="rr-sub">leave it as a suggestion</span>
+  </button>
+  <div class="rr-pop-hint" hidden></div>
+</div>
+
+<div class="rr-toast" id="rr-toast" role="status" hidden>
+  <span class="rr-toast-msg"></span>
+  <button type="button" class="rr-toast-act" hidden></button>
+</div>
+
+<script>
+/* Ghost-node suggestion actions. Self-contained IIFE; reads only window.d3,
+   window.RR_WORKMODE, and the DOM. No globals leak except RR_toast (shared with
+   the work-mode client). Safe no-op if d3 or the popover markup is absent. */
+(function () {
+  var d3 = window.d3;
+  var pop = document.getElementById('rr-ghost-pop');
+  if (!d3 || !pop) return;
+
+  var popTitle = pop.querySelector('.rr-pop-title');
+  var popHint  = pop.querySelector('.rr-pop-hint');
+  var current  = null;                 // the ghost datum the popover is acting on
+
+  function rrEsc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+  function idOf(x){ return (x && typeof x === 'object') ? x.id : x; }
+
+  function lsGet(k, def){ try { var v = localStorage.getItem(k); return v == null ? def : JSON.parse(v); } catch (e) { return def; } }
+  function lsSet(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function dismissedSet(){ var a = lsGet('rr-dismissed', []); return new Set(Array.isArray(a) ? a : []); }
+
+  /* ---- shared toast (also used by the work-mode refresh client) ---- */
+  var toastEl  = document.getElementById('rr-toast');
+  var toastMsg = toastEl && toastEl.querySelector('.rr-toast-msg');
+  var toastBtn = toastEl && toastEl.querySelector('.rr-toast-act');
+  var toastTimer = null;
+  function hideToast(){ if (!toastEl) return; toastEl.classList.remove('show'); toastEl.setAttribute('hidden',''); }
+  function toast(msg, actionLabel, onAction){
+    if (!toastEl) return;
+    toastMsg.textContent = msg;
+    if (actionLabel && onAction){
+      toastBtn.textContent = actionLabel; toastBtn.removeAttribute('hidden');
+      toastBtn.onclick = function(){ hideToast(); onAction(); };
+    } else { toastBtn.setAttribute('hidden',''); toastBtn.onclick = null; }
+    toastEl.removeAttribute('hidden'); toastEl.classList.add('show');
+    if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+    if (!(actionLabel && onAction)) toastTimer = setTimeout(hideToast, 2800);
+  }
+  window.RR_toast = toast;            // let Phase 4's refresh client reuse it
+
+  function legacyCopy(text){
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      var ok = document.execCommand('copy'); document.body.removeChild(ta);
+      return !!ok;
+    } catch (e) { return false; }
+  }
+  // returns a Promise<bool> — true only if the text actually reached the clipboard
+  function copy(text){
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      return navigator.clipboard.writeText(text)
+        .then(function (){ return true; })
+        .catch(function (){ return legacyCopy(text); });
+    }
+    return Promise.resolve(legacyCopy(text));
+  }
+
+  /* ---- hide a reference everywhere it shows: ghost node, edges, queue row ---- */
+  function hideGhost(id){
+    d3.selectAll('g.node.ghost').filter(function (d){ return d.id === id; }).style('display', 'none');
+    d3.selectAll('line.link').filter(function (l){
+      return idOf(l.source) === id || idOf(l.target) === id; }).style('display', 'none');
+    var rows = document.querySelectorAll('#queue .qitem');
+    for (var i = 0; i < rows.length; i++) if (rows[i].getAttribute('data-rr-id') === id) rows[i].style.display = 'none';
+  }
+
+  /* Give each reading-queue row the same Analyze / Dismiss / Keep actions as a
+     ghost node, via a per-row trigger that opens the shared popover. */
+  function enhanceQueue(){
+    var rows = document.querySelectorAll('#queue .qitem');
+    for (var i = 0; i < rows.length; i++) (function (row){
+      var link = row.querySelector('.q-title a');
+      var idEl = row.querySelector('.q-id');
+      var id = (idEl ? idEl.textContent : '').trim();
+      if (!id) return;
+      row.setAttribute('data-rr-id', id);
+      var datum = {
+        id: id,
+        label: (link ? link.textContent : '').trim() || ('arXiv:' + id),
+        url: (link && link.href) || ('https://arxiv.org/abs/' + id),
+      };
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'rr-q-act';
+      b.setAttribute('aria-haspopup', 'menu');
+      b.setAttribute('aria-label', 'Actions for ' + datum.label);
+      b.textContent = '⋯';
+      b.addEventListener('click', function (e){ e.stopPropagation(); openPop(datum, e.clientX + 6, e.clientY + 6); });
+      row.appendChild(b);
+    })(rows[i]);
+  }
+  enhanceQueue();
+
+  /* On load: honor this browser's locally-dismissed refs (degraded persistence
+     for the static site; the build honors dismissed.json for the real removal). */
+  var local = dismissedSet();
+  if (local.size) local.forEach(hideGhost);
+
+  /* ---- popover open/close ---- */
+  function setHint(html){
+    if (!popHint) return;
+    if (html){ popHint.innerHTML = html; popHint.removeAttribute('hidden'); }
+    else { popHint.innerHTML = ''; popHint.setAttribute('hidden',''); }
+  }
+  function closePop(){ pop.classList.remove('show'); pop.setAttribute('hidden',''); current = null; setHint(''); }
+  function openPop(d, x, y){
+    current = d; setHint('');
+    popTitle.textContent = d.label || ('arXiv:' + d.id);
+    pop.removeAttribute('hidden'); pop.classList.add('show');
+    var pw = pop.offsetWidth, ph = pop.offsetHeight;
+    pop.style.left = Math.max(8, Math.min(x, window.innerWidth  - pw - 10)) + 'px';
+    pop.style.top  = Math.max(8, Math.min(y, window.innerHeight - ph - 10)) + 'px';
+    var first = pop.querySelector('.rr-pop-act');   // honor the role=menu contract
+    if (first) first.focus();
+  }
+
+  /* ---- the three actions ---- */
+  function doAnalyze(d){
+    var cmd = '/explain-paper ' + d.id;
+    if (window.RR_WORKMODE && typeof window.RR_runInTerminal === 'function'){
+      window.RR_runInTerminal(cmd);              // Phase 4: into the integrated terminal
+      closePop();
+      return;
+    }
+    var arxiv = ' <a href="' + rrEsc(d.url) + '" target="_blank" rel="noopener">Open on arXiv</a>';
+    copy(cmd).then(function (ok){                  // static / browse mode: degrade gracefully
+      setHint((ok ? 'Copied <b>' + rrEsc(cmd) + '</b> — paste it into your AI assistant.'
+                  : 'Run <b>' + rrEsc(cmd) + '</b> in your AI assistant.') + arxiv);
+    });
+  }
+
+  function doDismiss(d){
+    if (window.RR_WORKMODE && typeof window.RR_dismissGhost === 'function'){
+      Promise.resolve(window.RR_dismissGhost(d)).then(function (){
+        hideGhost(d.id); closePop(); toast('Dismissed — rebuilding…');
+      }).catch(function (){
+        // don't lose the action: fall back to the local (this-browser) dismiss
+        var s = dismissedSet(); s.add(d.id); lsSet('rr-dismissed', Array.from(s));
+        hideGhost(d.id); closePop(); toast('Server busy — hidden in this browser');
+      });
+      return;
+    }
+    var s = dismissedSet(); s.add(d.id); lsSet('rr-dismissed', Array.from(s));  // degrade
+    hideGhost(d.id);
+    setHint('Hidden in this browser. To dismiss it permanently, add <b>"' + rrEsc(d.id)
+          + '"</b> to <b>dismissed.json</b> and rebuild.');
+    toast('Ghost hidden in this browser');
+  }
+
+  /* ---- wire popover buttons ---- */
+  pop.querySelectorAll('.rr-pop-act').forEach(function (btn){
+    btn.addEventListener('click', function (e){
+      e.stopPropagation();
+      if (!current) return;
+      var act = btn.getAttribute('data-act');
+      if (act === 'analyze') doAnalyze(current);
+      else if (act === 'dismiss') doDismiss(current);
+      else closePop();
+    });
+  });
+
+  /* ---- override ONLY ghost-node clicks (paper nodes keep template behavior) ---- */
+  d3.selectAll('g.node.ghost')
+    .on('click', null)                            // drop the template's navigate-to-arXiv
+    .on('click', function (event, d){
+      event.stopPropagation();
+      openPop(d, event.clientX + 6, event.clientY + 6);
+    });
+
+  /* ---- dismiss popover on outside click / Escape ---- */
+  document.addEventListener('click', function (e){
+    if (pop.classList.contains('show') && !pop.contains(e.target)) closePop();
+  });
+  document.addEventListener('keydown', function (e){
+    if (e.key === 'Escape' && pop.classList.contains('show')) closePop();
+  });
+
+  /* ---- arrow-key roving between menu items (role=menu contract) ---- */
+  pop.addEventListener('keydown', function (e){
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    var items = Array.prototype.slice.call(pop.querySelectorAll('.rr-pop-act'));
+    if (!items.length) return;
+    var i = items.indexOf(document.activeElement);
+    var n = e.key === 'ArrowDown' ? i + 1 : i - 1;
+    items[(n + items.length) % items.length].focus();
+  });
+})();
+</script>

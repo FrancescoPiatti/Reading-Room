@@ -1,0 +1,31 @@
+{
+  "field": "ml",
+  "label": "Machine learning",
+  "tags": [
+    "deep-learning",
+    "theory",
+    "optimization",
+    "generative-models",
+    "reinforcement-learning",
+    "natural-language-processing",
+    "computer-vision",
+    "representation-learning",
+    "probabilistic-methods",
+    "efficiency",
+    "datasets-and-benchmarks",
+    "reproducibility"
+  ],
+  "max_tags": 4,
+  "sections": [
+    {"key": "summary", "title": "Summary"},
+    {"key": "math", "title": "Method & math"},
+    {"key": "architecture", "title": "Architecture"},
+    {"key": "results", "title": "Results"},
+    {"key": "significance", "title": "Novelty & significance"},
+    {"key": "reproducibility", "title": "Reproducibility"}
+  ],
+  "required_sections": ["summary", "significance"],
+  "lens": "the method: its formulation, the key equations, and why it works — over-invest here rather than just restating results",
+  "lens_key": "math",
+  "tone": "assume an ML PhD peer; use LaTeX for all mathematics"
+}

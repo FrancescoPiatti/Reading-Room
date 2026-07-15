@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{SITE_TITLE}} — paper catalogue</title>
+<script>
+  /* set theme before paint to avoid a flash of the wrong theme; light is default */
+  (function () {
+    try { if (localStorage.getItem('rr-theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark'); } catch (e) {}
+  })();
+</script>
+<style>
+/* fonts are self-hosted (assets/fonts/, via the inlined @font-face rules below) —
+   pages load offline and no reading activity is sent to a fonts CDN */
+{{BASE_CSS}}
+</style>
+</head>
+<body class="index">
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html">{{SITE_TITLE}}</a>
+    <div class="topnav">
+    <a class="topnav-link" href="library.html">Library</a>
+    <a class="topnav-link" href="graph.html">Connections</a>
+    <button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle light / dark theme">
+      <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <header>
+    <p class="eyebrow">A reading room for papers</p>
+    <h1 class="title">{{SITE_TITLE}}</h1>
+    <p class="byline">Focused breakdowns of the papers worth keeping.</p>
+    {{PROFILE_LINE}}
+  </header>
+
+  <div class="controls">
+    <input class="search" id="q" type="search" placeholder="Search titles, authors, ideas…" aria-label="Search papers" autocomplete="off">
+    <span class="count" id="count"></span>
+  </div>
+  <div class="statusbar" id="statusbar" aria-label="Filter by reading status">
+    <button class="seg" data-status="" aria-pressed="true">All</button>
+    <button class="seg" data-status="to-read" aria-pressed="false">To read</button>
+    <button class="seg" data-status="reading" aria-pressed="false">Reading</button>
+    <button class="seg" data-status="read" aria-pressed="false">Read</button>
+  </div>
+  <div class="filters" id="filters" aria-label="Filter by tag"></div>
+
+  <div class="cards" id="cards"></div>
+  <p class="empty" id="empty" hidden>No papers match that.</p>
+
+  <div class="more-row" id="moreRow" hidden>
+    <button class="more-btn" id="moreBtn" type="button">
+      <span id="moreLabel">Show more</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+  </div>
+
+  {{COMPARES}}
+  {{CHATS}}
+</main>
+
+<script src="assets/vendor/fuse.min.js"></script>
+<script>
+const CATALOGUE = {{CATALOGUE_JSON}};
+
+const cardsEl = document.getElementById('cards');
+const emptyEl = document.getElementById('empty');
+const countEl = document.getElementById('count');
+const qEl = document.getElementById('q');
+const filtersEl = document.getElementById('filters');
+const statusEl = document.getElementById('statusbar');
+const moreRow = document.getElementById('moreRow');
+const moreBtn = document.getElementById('moreBtn');
+const moreLabel = document.getElementById('moreLabel');
+
+const STATUS_LABELS = {'to-read': 'To read', 'reading': 'Reading', 'read': 'Read'};
+// effective status/priority: a localStorage override (set on a report or the Library) wins over the digest default
+function lsGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+function statusOf(p){ const o = lsGet('rr-status-'+p.id); if (o && STATUS_LABELS[o]) return o; return STATUS_LABELS[p.status] ? p.status : 'to-read'; }
+function prioOf(p){ const o = lsGet('rr-prio-'+p.id); if (o !== null) return parseInt(o,10) || 0; return p.priority || 0; }
+
+let activeTag = null;
+let activeStatus = '';
+const PAGE = 8;     // papers shown before the "Show more" pager
+const STEP = 10;    // how many more each click reveals
+let shown = PAGE;
+
+// Fuse is vendored (assets/vendor/), but guard anyway: if it ever fails to load,
+// search degrades to a plain substring match instead of crashing the whole page.
+let fuse = null;
+try {
+  fuse = new Fuse(CATALOGUE, {
+    keys: [
+      {name: 'title', weight: 3}, {name: 'authors', weight: 2}, {name: 'tldr', weight: 2},
+      {name: 'tags', weight: 2}, {name: 'contributions', weight: 2},
+      {name: 'text', weight: 1}   // full report body, lower weight so titles still win
+    ],
+    threshold: 0.38, ignoreLocation: true
+  });
+} catch (e) { /* fall through to substring search */ }
+
+function searchList(q){
+  if (fuse) return fuse.search(q).map(r => r.item);
+  const s = q.toLowerCase();
+  return CATALOGUE.filter(p =>
+    (p.title + ' ' + (p.authors||[]).join(' ') + ' ' + (p.tldr||'') + ' '
+     + (p.tags||[]).join(' ') + ' ' + (p.text||'')).toLowerCase().includes(s));
+}
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+const CARD_TAG_CAP = 5;
+function card(p){
+  const meta = [p.venue, p.year].filter(Boolean).join(' · ');
+  const all = p.tags || [];
+  const shown = all.slice(0, CARD_TAG_CAP).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+  const extra = all.length > CARD_TAG_CAP ? `<span class="tag more">+${all.length - CARD_TAG_CAP}</span>` : '';
+  const tags = shown + extra;
+  const authors = (p.authors||[]).join(', ');
+  const st = statusOf(p);
+  const pr = prioOf(p);
+  const stars = pr ? `<span class="prio">${'★'.repeat(pr)}</span>` : '';
+  const badge = `<span class="badge st-${st}">${STATUS_LABELS[st]}</span>${stars}`;
+  return `<a class="card" href="papers/${esc(p.id)}/index.html">
+    <div class="c-top"><p class="c-meta">${esc(meta || 'paper')}</p>${badge}</div>
+    <h2 class="c-title">${esc(p.title)}</h2>
+    <p class="c-authors">${esc(authors)}</p>
+    <p class="c-tldr">${esc(p.tldr||'')}</p>
+    <div class="c-tags">${tags}</div>
+    <span class="c-read">Read →</span>
+  </a>`;
+}
+
+function render(){
+  const q = qEl.value.trim();
+  let list = q ? searchList(q) : CATALOGUE.slice();
+  if (activeTag) list = list.filter(p => (p.tags||[]).includes(activeTag));
+  if (activeStatus) list = list.filter(p => statusOf(p) === activeStatus);
+  const slice = list.slice(0, shown);
+  cardsEl.innerHTML = slice.map(card).join('');
+  if (list.length === 0) {
+    emptyEl.hidden = false;
+    // a fresh install (no papers at all) gets a welcome + call to action, not a "no match"
+    emptyEl.innerHTML = CATALOGUE.length === 0
+      ? 'No papers yet — add your first with <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant (Claude, Codex, or Gemini) — it builds the page for you.'
+      : 'No papers match that.';
+  } else {
+    emptyEl.hidden = true;
+  }
+  countEl.textContent = list.length + (list.length === 1 ? ' paper' : ' papers');
+  const remaining = list.length - slice.length;
+  if (remaining > 0) { moreLabel.textContent = 'Show ' + Math.min(STEP, remaining) + ' more'; moreRow.hidden = false; }
+  else { moreRow.hidden = true; }
+}
+
+statusEl.querySelectorAll('.seg').forEach(btn => {
+  btn.addEventListener('click', () => {
+    activeStatus = btn.dataset.status;
+    statusEl.querySelectorAll('.seg').forEach(b =>
+      b.setAttribute('aria-pressed', b.dataset.status === activeStatus ? 'true' : 'false'));
+    shown = PAGE;
+    render();
+  });
+});
+
+const FILTER_CAP = 14;   // collapse the tag list once it gets long
+let filtersExpanded = false;
+
+function buildFilters(){
+  const counts = {};
+  CATALOGUE.forEach(p => (p.tags||[]).forEach(t => counts[t] = (counts[t]||0)+1));
+  const tags = Object.keys(counts).sort((a,b) => counts[b]-counts[a] || a.localeCompare(b));
+  const overflow = tags.length > FILTER_CAP;
+  const visible = (overflow && !filtersExpanded) ? tags.slice(0, FILTER_CAP) : tags;
+
+  let html = visible.map(t =>
+    `<button class="chip${t===activeTag?' is-on':''}" data-tag="${esc(t)}" aria-pressed="${t===activeTag}">${esc(t)} <span class="chip-n">${counts[t]}</span></button>`).join('');
+  if (overflow) {
+    const hidden = tags.length - FILTER_CAP;
+    html += `<button class="chip chip-toggle" data-toggle="1">${filtersExpanded ? 'Show fewer' : 'Show all ' + tags.length}</button>`;
+  }
+  filtersEl.innerHTML = html;
+
+  filtersEl.querySelectorAll('.chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.toggle) { filtersExpanded = !filtersExpanded; buildFilters(); return; }
+      const t = btn.dataset.tag;
+      activeTag = (activeTag === t) ? null : t;
+      shown = PAGE;
+      buildFilters();
+      render();
+    });
+  });
+}
+
+qEl.addEventListener('input', function(){ shown = PAGE; render(); });
+moreBtn.addEventListener('click', function(){ shown += STEP; render(); });
+buildFilters();
+render();
+
+// theme toggle — persists to localStorage, light is default
+(function () {
+  var root = document.documentElement;
+  var btn = document.querySelector('.theme-toggle');
+  if (!btn) return;
+  function sync() { btn.setAttribute('aria-pressed', root.getAttribute('data-theme') === 'dark' ? 'true' : 'false'); }
+  sync();
+  btn.addEventListener('click', function () {
+    var dark = root.getAttribute('data-theme') === 'dark';
+    if (dark) { root.removeAttribute('data-theme'); } else { root.setAttribute('data-theme', 'dark'); }
+    try { localStorage.setItem('rr-theme', dark ? 'light' : 'dark'); } catch (e) {}
+    sync();
+  });
+})();
+</script>
+</body>
+</html>

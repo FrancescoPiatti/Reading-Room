@@ -1,0 +1,620 @@
+<!-- ===========================================================================
+  account.html — avatar menu + Profile / Setup modals.
+
+  PURELY ADDITIVE. build.py's finalize_page() injects this at the end of the page
+  body on every rendered page, and injects the avatar button (.rr-acct-btn) next to the theme
+  toggle in the topbar. Styling uses ONLY base.css tokens, so it themes light/dark
+  for free. {{ACCOUNT_PROFILE_JSON}} / {{ACCOUNT_SECTIONS_JSON}} are filled in by
+  build.py (embedded JS literals, with the </ guard).
+
+  • Profile  — a blurred-backdrop modal showing the current profile.json (read-only).
+  • Setup    — a blurred-backdrop questionnaire (Back/Next; no terminal) pre-filled
+               from the profile. Near the end it offers Launch claude / codex / gemini,
+               then Finish. In work mode (RR_WORKMODE) Finish POSTs the answers to
+               /api/setup-intake and pre-types /setup in the integrated terminal, where
+               the agent confirms each change. On the static site it degrades to a
+               copyable profile + instructions.
+=========================================================================== -->
+<div class="rr-acct-menu" id="rr-acct-menu" role="menu" aria-label="Account" hidden>
+  <button type="button" class="rr-acct-item" data-acct="tutorial" role="menuitem">Tutorial</button>
+  <button type="button" class="rr-acct-item" data-acct="profile" role="menuitem">Profile</button>
+  <button type="button" class="rr-acct-item" data-acct="setup" role="menuitem">Setup</button>
+  <button type="button" class="rr-acct-item" data-acct="backup" role="menuitem">Back up</button>
+</div>
+
+<div class="rr-modal" id="rr-profile-modal" hidden>
+  <div class="rr-modal-backdrop" data-rr-close></div>
+  <div class="rr-modal-card" role="dialog" aria-modal="true" aria-labelledby="rr-profile-title">
+    <div class="rr-modal-head">
+      <h2 class="rr-modal-title" id="rr-profile-title">Profile</h2>
+      <button type="button" class="rr-modal-x" data-rr-close aria-label="Close">&#10005;</button>
+    </div>
+    <div class="rr-modal-body" id="rr-profile-body"></div>
+    <div class="rr-modal-foot">
+      <span class="rr-spacer"></span>
+      <button type="button" class="rr-btn rr-btn-ghost" data-rr-close>Close</button>
+      <button type="button" class="rr-btn" id="rr-profile-edit">Edit in Setup &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<div class="rr-modal" id="rr-setup-modal" hidden>
+  <div class="rr-modal-backdrop" data-rr-close></div>
+  <div class="rr-modal-card" role="dialog" aria-modal="true" aria-labelledby="rr-setup-title">
+    <div class="rr-modal-head">
+      <h2 class="rr-modal-title" id="rr-setup-title">Setup</h2>
+      <button type="button" class="rr-modal-x" data-rr-close aria-label="Close">&#10005;</button>
+    </div>
+    <div class="rr-setup-progress" aria-hidden="true"><div class="rr-setup-bar" id="rr-setup-bar"></div></div>
+    <div class="rr-modal-body rr-setup-body" id="rr-setup-body"></div>
+    <div class="rr-modal-foot rr-setup-foot">
+      <span class="rr-setup-step" id="rr-setup-step"></span>
+      <span class="rr-spacer"></span>
+      <button type="button" class="rr-btn rr-btn-ghost" id="rr-setup-back">Back</button>
+      <button type="button" class="rr-btn" id="rr-setup-next">Next</button>
+      <span class="rr-setup-launch" id="rr-setup-launch" hidden>
+        <button type="button" class="rr-btn rr-btn-ghost" data-rr-agent="claude">Launch claude</button>
+        <button type="button" class="rr-btn rr-btn-ghost" data-rr-agent="codex">Launch codex</button>
+        <button type="button" class="rr-btn rr-btn-ghost" data-rr-agent="gemini">Launch gemini</button>
+      </span>
+      <button type="button" class="rr-btn rr-btn-go" id="rr-setup-finish" hidden>Finish</button>
+    </div>
+  </div>
+</div>
+
+<div class="rr-modal" id="rr-backup-modal" hidden>
+  <div class="rr-modal-backdrop" data-rr-close></div>
+  <div class="rr-modal-card" role="dialog" aria-modal="true" aria-labelledby="rr-backup-title">
+    <div class="rr-modal-head">
+      <h2 class="rr-modal-title" id="rr-backup-title">Back up reading state</h2>
+      <button type="button" class="rr-modal-x" data-rr-close aria-label="Close">&#10005;</button>
+    </div>
+    <div class="rr-modal-body">
+      <p class="rr-q-hint">Your <b>reading status</b>, <b>priority stars</b>, <b>custom tags / collections</b>, dismissed graph nodes, and theme are stored in this browser only. Export them to a small JSON file to move them to another browser or device, or as a backup.</p>
+      <p class="rr-q-hint">Your analysed papers, comparisons and discussions are files on disk — back those up with <code>/backup export</code> (or <code>python archive.py export</code>), which writes a full zip.</p>
+      <p class="rr-q-note" id="rr-backup-msg" hidden></p>
+    </div>
+    <div class="rr-modal-foot">
+      <span class="rr-backup-count rr-setup-step" id="rr-backup-count"></span>
+      <span class="rr-spacer"></span>
+      <button type="button" class="rr-btn rr-btn-ghost" id="rr-backup-import">Import…</button>
+      <button type="button" class="rr-btn" id="rr-backup-export">Export</button>
+      <input type="file" id="rr-backup-file" accept="application/json,.json" hidden>
+    </div>
+  </div>
+</div>
+
+<div class="rr-modal" id="rr-tutorial-modal" hidden>
+  <div class="rr-modal-backdrop" data-rr-close></div>
+  <div class="rr-modal-card rr-modal-card--wide" role="dialog" aria-modal="true" aria-labelledby="rr-tut-title">
+    <div class="rr-modal-head">
+      <h2 class="rr-modal-title" id="rr-tut-title">Welcome to {{SITE_TITLE}}</h2>
+      <button type="button" class="rr-modal-x" data-rr-close aria-label="Close">&#10005;</button>
+    </div>
+    <div class="rr-setup-progress" aria-hidden="true"><div class="rr-setup-bar" id="rr-tut-bar"></div></div>
+    <div class="rr-modal-body rr-tut-body" id="rr-tut-body"></div>
+    <div class="rr-modal-foot">
+      <span class="rr-setup-step" id="rr-tut-step"></span>
+      <span class="rr-spacer"></span>
+      <button type="button" class="rr-btn rr-btn-ghost" id="rr-tut-skip">Skip</button>
+      <button type="button" class="rr-btn rr-btn-ghost" id="rr-tut-back">Back</button>
+      <button type="button" class="rr-btn" id="rr-tut-next">Next</button>
+      <button type="button" class="rr-btn rr-btn-go" id="rr-tut-finish" hidden>Set up your profile &rarr;</button>
+    </div>
+  </div>
+</div>
+
+<!-- Non-blocking "apply setup" bar. After launching an AI we CLOSE the Setup modal
+     (so its blurred backdrop doesn't cover the terminal — a first-run login needs to be
+     typed into it); this small bar then lets you apply your setup once the agent is up. -->
+<div class="rr-setup-finishbar" id="rr-setup-finishbar" hidden>
+  <span class="rr-sfb-msg" id="rr-sfb-msg"></span>
+  <button type="button" class="rr-btn rr-btn-go" id="rr-sfb-apply">Apply setup</button>
+  <button type="button" class="rr-btn rr-btn-ghost" id="rr-sfb-dismiss">Dismiss</button>
+</div>
+
+<script>
+/* Account menu + Profile/Setup modals. Self-contained IIFE; reads the embedded
+   profile + section list and the optional work-mode hooks (RR_WORKMODE,
+   RR_launchAgent, RR_runInTerminal). Safe no-op if the avatar button is absent. */
+(function () {
+  var PROFILE  = {{ACCOUNT_PROFILE_JSON}};
+  var SECTIONS = {{ACCOUNT_SECTIONS_JSON}};   // [{key,title}] for the "default views" question
+  var FIELDS   = {{ACCOUNT_FIELDS_JSON}};     // {available:[{field,label}], active:[id]} for the field picker
+  var btn = document.querySelector('.rr-acct-btn');
+  var menu = document.getElementById('rr-acct-menu');
+  if (!btn || !menu) return;
+
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+  var lastFocus = null;
+
+  /* ----------------------------------------------------------------- menu */
+  function menuOpen(){ return !menu.hasAttribute('hidden'); }
+  function closeMenu(){ menu.setAttribute('hidden',''); btn.setAttribute('aria-expanded','false'); }
+  function openMenu(){
+    var r = btn.getBoundingClientRect();
+    menu.removeAttribute('hidden');
+    var mw = menu.offsetWidth || 160;
+    menu.style.top = Math.round(r.bottom + 8) + 'px';
+    menu.style.left = Math.round(Math.max(8, Math.min(r.right - mw, window.innerWidth - mw - 8))) + 'px';
+    btn.setAttribute('aria-expanded','true');
+    var f = menu.querySelector('.rr-acct-item'); if (f) f.focus();
+  }
+  btn.addEventListener('click', function (e){ e.stopPropagation(); menuOpen() ? closeMenu() : openMenu(); });
+  document.addEventListener('click', function (e){ if (menuOpen() && !menu.contains(e.target) && e.target !== btn) closeMenu(); });
+  document.addEventListener('keydown', function (e){ if (e.key === 'Escape' && menuOpen()) { closeMenu(); btn.focus(); } });
+
+  menu.addEventListener('click', function (e){
+    var it = e.target.closest('.rr-acct-item'); if (!it) return;
+    closeMenu();
+    var which = it.getAttribute('data-acct');
+    if (which === 'profile') openProfile();
+    else if (which === 'backup') openBackup();
+    else if (which === 'tutorial') openTutorial(false);
+    else openSetup();
+  });
+
+  /* --------------------------------------------------------------- modals */
+  var profileModal = document.getElementById('rr-profile-modal');
+  var setupModal   = document.getElementById('rr-setup-modal');
+  var backupModal  = document.getElementById('rr-backup-modal');
+  var tutorialModal = document.getElementById('rr-tutorial-modal');
+
+  function openModal(m){
+    [profileModal, setupModal, backupModal, tutorialModal].forEach(function (x){ if (x !== m) x.setAttribute('hidden',''); }); // never two at once
+    lastFocus = document.activeElement;
+    m.removeAttribute('hidden');
+    document.body.classList.add('rr-modal-open');
+    var f = m.querySelector('.rr-modal-x'); if (f) f.focus();
+  }
+  function closeModal(m){
+    m.setAttribute('hidden','');
+    if (!document.querySelector('.rr-modal:not([hidden])')) document.body.classList.remove('rr-modal-open');
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+    // closing the tutorial (any way — Finish, Skip, ×, backdrop, Esc) marks it seen and,
+    // on first run, hands off straight to Setup.
+    if (m === tutorialModal) {
+      try { localStorage.setItem('rr-tutorial-seen', '1'); } catch (e) {}
+      if (tutToSetup) { tutToSetup = false; autoOpenTimer = setTimeout(openSetup, 250); }
+    }
+  }
+  // backdrop / × / [data-rr-close] close their modal; Esc closes the open one
+  [profileModal, setupModal, backupModal, tutorialModal].forEach(function (m){
+    m.addEventListener('click', function (e){ if (e.target.hasAttribute('data-rr-close')) closeModal(m); });
+  });
+  document.addEventListener('keydown', function (e){
+    if (e.key !== 'Escape') return;
+    var open = document.querySelector('.rr-modal:not([hidden])');
+    if (open) closeModal(open);
+  });
+  // focus trap: while a modal is open, Tab cycles within it instead of escaping
+  // to the (blurred, inert-looking) page underneath
+  document.addEventListener('keydown', function (e){
+    if (e.key !== 'Tab') return;
+    var open = document.querySelector('.rr-modal:not([hidden])');
+    if (!open) return;
+    var els = Array.prototype.filter.call(
+      open.querySelectorAll('button, input, textarea, select, a[href], [tabindex]:not([tabindex="-1"])'),
+      function (el){ return !el.disabled && !el.hasAttribute('hidden') && el.offsetParent !== null; });
+    if (!els.length) return;
+    var first = els[0], last = els[els.length - 1], act = document.activeElement;
+    if (e.shiftKey && (act === first || !open.contains(act))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (act === last || !open.contains(act))) { e.preventDefault(); first.focus(); }
+  });
+
+  /* -------------------------------------------------------------- profile */
+  // value is trusted markup — every caller passes esc()'d text or safe HTML (chips/spans)
+  function row(label, value){
+    return '<div class="rr-kv"><span class="rr-k">' + esc(label) + '</span>'
+         + '<span class="rr-v">' + value + '</span></div>';
+  }
+  function chips(arr){
+    if (!arr || !arr.length) return '<span class="rr-muted">—</span>';
+    return arr.map(function (x){ return '<span class="rr-chip">' + esc(x) + '</span>'; }).join(' ');
+  }
+  function openProfile(){
+    var p = PROFILE || {};
+    var d = p.defaults || {};
+    var body = document.getElementById('rr-profile-body');
+    if (!p.name && !p.role && !(p.expertise||[]).length){
+      body.innerHTML = '<p class="rr-muted">No profile yet. Open <b>Setup</b> to create one.</p>';
+    } else {
+      var html = '';
+      html += row('Name', esc(p.name) || '<span class="rr-muted">—</span>');
+      html += row('Role', esc(p.role) || '<span class="rr-muted">—</span>');
+      if (p.affiliation) html += row('Affiliation', esc(p.affiliation));
+      html += row('Expertise', chips(p.expertise));
+      if (p.interests && p.interests.length) html += row('Interests', chips(p.interests));
+      html += row('Report defaults', esc((d.depth || 'standard')) + ' &middot; ' + esc((d.audience || 'peer'))
+                  + ((d.views && d.views.length) ? ' &middot; views: ' + d.views.map(esc).join(', ') : ' &middot; all views'));
+      if (p.tagline) html += row('Tagline', esc(p.tagline));
+      body.innerHTML = html;
+    }
+    openModal(profileModal);
+  }
+  document.getElementById('rr-profile-edit').addEventListener('click', function (){ closeModal(profileModal); openSetup(); });
+
+  /* --------------------------------------------------------------- backup */
+  // Reading state (status / priority / dismissals / theme) lives in localStorage, per
+  // browser. Export/import it as a small JSON so it can move between browsers/devices.
+  // The on-disk data (reports/compares/chats) is handled by archive.py / the /backup command.
+  var backupMsgEl   = document.getElementById('rr-backup-msg');
+  var backupCountEl = document.getElementById('rr-backup-count');
+  var backupFileEl  = document.getElementById('rr-backup-file');
+  function isStateKey(k){ return /^rr-(status|prio|tags)-/.test(k) || k === 'rr-dismissed' || k === 'rr-theme'; }
+  function stateKeys(){
+    var ks = [];
+    try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (isStateKey(k)) ks.push(k); } } catch (e) {}
+    return ks;
+  }
+  function backupMsg(t){ if (!backupMsgEl) return; backupMsgEl.textContent = t || ''; backupMsgEl.hidden = !t; }
+  function openBackup(){
+    backupMsg('');
+    var ks = stateKeys();
+    backupCountEl.textContent = ks.length + (ks.length === 1 ? ' item in this browser' : ' items in this browser');
+    openModal(backupModal);
+  }
+  document.getElementById('rr-backup-export').addEventListener('click', function (){
+    var data = { tool: 'reading-room', kind: 'reading-state', exported: new Date().toISOString().slice(0, 10), state: {} };
+    stateKeys().forEach(function (k){ data.state[k] = localStorage.getItem(k); });
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a'); a.href = url; a.download = 'reading-state-' + data.exported + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function (){ URL.revokeObjectURL(url); }, 1000);
+    backupMsg('Downloaded ' + Object.keys(data.state).length + ' item(s). Keep it alongside your data zip for a full backup.');
+  });
+  document.getElementById('rr-backup-import').addEventListener('click', function (){ backupFileEl.click(); });
+  backupFileEl.addEventListener('change', function (){
+    var f = backupFileEl.files && backupFileEl.files[0];
+    backupFileEl.value = '';                       // allow re-selecting the same file later
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function (){
+      var parsed; try { parsed = JSON.parse(reader.result); } catch (e) { backupMsg('Could not read that file — is it a reading-state JSON?'); return; }
+      if (!parsed || parsed.kind !== 'reading-state' || !parsed.state) { backupMsg('That doesn’t look like a reading-state export.'); return; }
+      var n = 0;
+      try { Object.keys(parsed.state).forEach(function (k){ if (isStateKey(k)) { localStorage.setItem(k, String(parsed.state[k])); n++; } }); }
+      catch (e) { backupMsg('Could not write to this browser’s storage.'); return; }
+      backupMsg('Imported ' + n + ' item(s). Reloading…');
+      setTimeout(function (){ location.reload(); }, 700);
+    };
+    reader.readAsText(f);
+  });
+
+  /* ---------------------------------------------------------------- setup */
+  // questionnaire steps. list = newline/comma separated → array; multi = checkboxes.
+  var STEPS = [
+    { key:'name',        label:'What should I call you?',          type:'text', ph:'e.g. Ada Lovelace', hint:'Used to greet you on the catalogue header.' },
+    { key:'role',        label:'Your role',                        type:'text', ph:'e.g. PhD student', hint:'Shown on your header, and tells reports who they’re written for.' },
+    { key:'affiliation', label:'Affiliation (optional)',           type:'text', ph:'e.g. MIT', hint:'Optional — shown on your header.' },
+    { key:'fields',      label:'Your field(s)',                    type:'fields', hint:'Pick one or more. This seeds your tag vocabulary and the focus-view tabs each report is divided into — both are adjustable on the next steps.' },
+    { key:'views',       label:'Default focus views',              type:'multi', hint:'The tabs each paper is split into. Summary and Significance are always written; tick the others you usually want, or add your own below. Each report still adapts this set to fit the paper.' },
+    { key:'expertise',   label:"Areas you're fluent in",           type:'list', hint:'One per line. Reports assume fluency here and won’t over-explain it.' },
+    { key:'interests',   label:'Topics you want to track (optional)', type:'list', hint:'One per line. Used to surface connections and flag papers worth your time — it doesn’t change a report’s content.' },
+    { key:'depth',       label:'Default report depth',             type:'choice', opts:[['skim','Skim'],['standard','Standard'],['deep','Deep']], hint:'How thorough each report is by default. You can override it per paper.' },
+    { key:'audience',    label:'Default audience',                 type:'choice', opts:[['peer','Peer — assume expertise'],['newcomer','Newcomer — more scaffolding']], hint:'Peer assumes you know the field; Newcomer adds more background. Override per paper.' },
+    { key:'tags',        label:'Tag vocabulary',                   type:'tags', hint:'One per line (broad, kebab-case, 2–4 per paper). Seeded from your field(s) — edit freely. Every paper’s tags must come from this set (the build enforces it).' },
+    { key:'tagline',     label:'Catalogue tagline (optional)',     type:'text', ph:'e.g. Papers I’m keeping, explained.', hint:'Optional — a one-line subtitle under “{{SITE_TITLE}}” on your catalogue.' },
+  ];
+
+  // seed answers from the current profile
+  function seed(){
+    var p = PROFILE || {}, d = p.defaults || {};
+    var act = (FIELDS && FIELDS.active) || [];
+    // custom focus views = active config sections that aren't from the field pack(s),
+    // so re-running Setup keeps any the reader added before
+    var packKeys = {};
+    mergeSel(act).sections.forEach(function (s){ packKeys[s.key] = 1; });
+    var custom = (SECTIONS || []).filter(function (s){
+      return s && s.key && s.key !== 'summary' && s.key !== 'significance' && !packKeys[s.key];
+    });
+    return {
+      fields: act.slice(),
+      tags: mergeSel(act).tags.slice(),
+      name: p.name || '', role: p.role || '', affiliation: p.affiliation || '',
+      expertise: (p.expertise || []).slice(), interests: (p.interests || []).slice(),
+      depth: d.depth || 'standard', audience: d.audience || 'peer',
+      views: (d.views || []).slice(), customViews: custom, tagline: p.tagline || '',
+    };
+  }
+  var ans, idx, tagsTouched = false;
+  var bodyEl  = document.getElementById('rr-setup-body');
+  var stepEl  = document.getElementById('rr-setup-step');
+  var barEl   = document.getElementById('rr-setup-bar');
+  var backBtn = document.getElementById('rr-setup-back');
+  var nextBtn = document.getElementById('rr-setup-next');
+  var finishBtn = document.getElementById('rr-setup-finish');
+  var launchWrap = document.getElementById('rr-setup-launch');
+
+  // merge the selected field packs' sections + tags (dedup by key/value, first wins);
+  // falls back to the build-time active config when nothing is selected.
+  function mergeSel(sel){
+    var avail = (FIELDS && FIELDS.available) || [], byId = {};
+    avail.forEach(function (f){ byId[f.field] = f; });
+    var secs = [], tags = [], seenS = {}, seenT = {};
+    (sel || []).forEach(function (id){
+      var f = byId[id]; if (!f) return;
+      (f.sections || []).forEach(function (s){ if (s && s.key && !seenS[s.key]) { seenS[s.key] = 1; secs.push(s); } });
+      (f.tags || []).forEach(function (t){ if (!seenT[t]) { seenT[t] = 1; tags.push(t); } });
+    });
+    if (!secs.length) secs = SECTIONS;
+    if (!tags.length) tags = (FIELDS && FIELDS.tags) || [];
+    return { sections: secs, tags: tags };
+  }
+
+  var autoOpenTimer = null;
+  function openSetup(){ if (autoOpenTimer) { clearTimeout(autoOpenTimer); autoOpenTimer = null; } hideFinishBar(); pendingProf = null; ans = seed(); idx = 0; tagsTouched = false; renderStep(); openModal(setupModal); }
+
+  function renderStep(){
+    var last = idx === STEPS.length - 1;
+    var s = STEPS[idx];
+    var v = ans[s.key];
+    var html = '<label class="rr-q-label" for="rr-q-input">' + esc(s.label) + '</label>';
+    if (s.hint) html += '<p class="rr-q-hint">' + esc(s.hint) + '</p>';
+    if (s.type === 'text') {
+      html += '<input class="rr-q-input" id="rr-q-input" type="text" value="' + esc(v) + '" placeholder="' + esc(s.ph || '') + '">';
+    } else if (s.type === 'list') {
+      html += '<textarea class="rr-q-input rr-q-area" id="rr-q-input" rows="5" placeholder="' + esc(s.ph || '') + '">' + esc((v || []).join('\n')) + '</textarea>';
+    } else if (s.type === 'choice') {
+      html += '<div class="rr-q-choices">' + s.opts.map(function (o){
+        return '<label class="rr-q-choice"><input type="radio" name="rr-q-radio" value="' + esc(o[0]) + '"' + (v === o[0] ? ' checked' : '') + '> ' + esc(o[1]) + '</label>';
+      }).join('') + '</div>';
+    } else if (s.type === 'multi') {
+      var base = mergeSel(ans.fields).sections.filter(function (sec){ return sec.key !== 'summary' && sec.key !== 'significance'; });
+      var msecs = base.concat(ans.customViews || []);
+      html += '<div class="rr-q-choices">' + msecs.map(function (sec){
+        var on = (v || []).indexOf(sec.key) !== -1;
+        return '<label class="rr-q-choice"><input type="checkbox" value="' + esc(sec.key) + '"' + (on ? ' checked' : '') + '> ' + esc(sec.title) + '</label>';
+      }).join('') + '</div>';
+      html += '<div class="rr-q-add"><input class="rr-q-input" id="rr-view-new" type="text" placeholder="Add your own, e.g. Robustness"><button class="rr-q-addbtn" type="button" id="rr-view-add">Add</button></div>';
+    } else if (s.type === 'tags') {
+      if (!tagsTouched) ans.tags = mergeSel(ans.fields).tags.slice();   // reflect selected field(s) until edited
+      html += '<textarea class="rr-q-input rr-q-area" id="rr-q-input" rows="6">' + esc((ans.tags || []).join('\n')) + '</textarea>';
+    } else if (s.type === 'fields') {
+      var avail = (FIELDS && FIELDS.available) || [];
+      html += avail.length
+        ? '<div class="rr-q-choices">' + avail.map(function (f){
+            var on = (v || []).indexOf(f.field) !== -1;
+            return '<label class="rr-q-choice"><input type="checkbox" value="' + esc(f.field) + '"' + (on ? ' checked' : '') + '> ' + esc(f.label) + '</label>';
+          }).join('') + '</div>'
+        : '<p class="rr-q-hint">No field packs found.</p>';
+    }
+    // on the last step, the Launch AI (Claude/Codex/Gemini) buttons appear in the footer — you
+    // must launch one for Finish to apply (it runs /setup in that terminal).
+    if (last) html += '<p class="rr-q-note"><b>Launch an AI (Claude, Codex, or Gemini)</b> below — this opens the terminal (log in there if it’s your first run), then an <b>Apply setup</b> bar runs <code>/setup</code> to write your profile.</p>';
+    bodyEl.innerHTML = html;
+    stepEl.textContent = 'Step ' + (idx + 1) + ' of ' + STEPS.length;
+    barEl.style.width = Math.round(((idx + 1) / STEPS.length) * 100) + '%';
+    // renderStep is authoritative for the whole footer, so reopening Setup after the
+    // browse-mode showManual() (which hides everything) fully restores the controls.
+    backBtn.hidden = false; backBtn.disabled = idx === 0;
+    nextBtn.hidden = last;
+    finishBtn.hidden = !last; finishBtn.disabled = false;
+    launchWrap.hidden = !last;            // Launch AI (Claude/Codex/Gemini) buttons appear on the final step, before Finish
+    if (s.type === 'multi') {             // wire the "add a focus view" button (custom default views)
+      var addBtn = document.getElementById('rr-view-add');
+      if (addBtn) addBtn.addEventListener('click', function (){
+        var inp = document.getElementById('rr-view-new');
+        var title = ((inp && inp.value) || '').trim(); if (!title) return;
+        var key = title.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+        if (!key) return;
+        capture();                         // keep the current checkbox selections
+        ans.customViews = ans.customViews || [];
+        if (!ans.customViews.some(function (c){ return c.key === key; })) ans.customViews.push({ key: key, title: title });
+        if ((ans.views || []).indexOf(key) === -1) ans.views = (ans.views || []).concat([key]);  // default the new one on
+        renderStep();
+      });
+    }
+    var first = bodyEl.querySelector('input, textarea'); if (first) first.focus();
+  }
+
+  function capture(){
+    var s = STEPS[idx];
+    if (s.type === 'text') ans[s.key] = bodyEl.querySelector('#rr-q-input').value.trim();
+    else if (s.type === 'list') ans[s.key] = bodyEl.querySelector('#rr-q-input').value.split('\n').map(function (x){ return x.trim(); }).filter(Boolean);
+    else if (s.type === 'choice') { var r = bodyEl.querySelector('input[name="rr-q-radio"]:checked'); if (r) ans[s.key] = r.value; }
+    else if (s.type === 'multi' || s.type === 'fields') ans[s.key] = Array.prototype.slice.call(bodyEl.querySelectorAll('input:checked')).map(function (c){ return c.value; });
+    else if (s.type === 'tags') {
+      var lines = bodyEl.querySelector('#rr-q-input').value.split('\n').map(function (x){ return x.trim(); }).filter(Boolean);
+      if (JSON.stringify(lines) !== JSON.stringify(mergeSel(ans.fields).tags)) tagsTouched = true;
+      ans.tags = lines;
+    }
+  }
+  backBtn.addEventListener('click', function (){ if (idx === 0) return; capture(); idx--; renderStep(); });
+  nextBtn.addEventListener('click', function (){ capture(); if (idx < STEPS.length - 1) { idx++; renderStep(); } });
+
+  // assemble a clean profile object from the answers (omit empty optionals)
+  function assemble(){
+    capture();
+    var p = { name: ans.name, role: ans.role };
+    if (ans.affiliation) p.affiliation = ans.affiliation;
+    if (ans.expertise.length) p.expertise = ans.expertise;
+    if (ans.interests.length) p.interests = ans.interests;
+    p.defaults = { depth: ans.depth, audience: ans.audience, views: ans.views };
+    if (ans.tagline) p.tagline = ans.tagline;
+    if (ans.fields && ans.fields.length) p.fields = ans.fields;  // -> /setup writes user/config.json
+    // only send tags if the user edited the vocabulary away from the field merge; else
+    // omit so /setup keeps the dynamic field-pack merge instead of freezing a copy
+    if (tagsTouched && ans.tags && ans.tags.length) p.tags = ans.tags;
+    // if the reader added custom focus views, send the full list (field sections + custom)
+    // so /setup writes it to user/config.json `sections`
+    if (ans.customViews && ans.customViews.length)
+      p.sections = mergeSel(ans.fields).sections.concat(ans.customViews);
+    return p;
+  }
+
+  // POST the answers, then run /setup in the live terminal. Resolves true if /setup
+  // reached a running agent, false if none is up yet. Shared by Finish + the apply bar.
+  function postIntakeThenSetup(prof){
+    return fetch('/api/setup-intake', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(prof) })
+      .then(function (r){ if (!r.ok) throw new Error('intake failed'); return r.json(); })
+      .then(function (){ return (typeof window.RR_submitCommand === 'function') && window.RR_submitCommand('/setup'); });
+  }
+
+  /* ---- floating "apply setup" bar (shown after Launch closes the modal) ---- */
+  var finishBar = document.getElementById('rr-setup-finishbar');
+  var sfbMsg    = document.getElementById('rr-sfb-msg');
+  var sfbApply  = document.getElementById('rr-sfb-apply');
+  var sfbDismiss= document.getElementById('rr-sfb-dismiss');
+  var pendingProf = null;
+  function hideFinishBar(){ if (finishBar) finishBar.setAttribute('hidden',''); }
+  function showFinishBar(name){
+    if (!finishBar) return;
+    sfbMsg.innerHTML = 'Log in to <b>' + esc(name) + '</b> in the terminal if prompted, then apply your setup.';
+    sfbApply.disabled = false;
+    finishBar.removeAttribute('hidden');
+  }
+  sfbDismiss.addEventListener('click', hideFinishBar);
+  sfbApply.addEventListener('click', function (){
+    if (!pendingProf) { hideFinishBar(); return; }
+    sfbApply.disabled = true; sfbMsg.textContent = 'Applying your setup…';
+    postIntakeThenSetup(pendingProf).then(function (sent){
+      if (sent) { if (window.RR_toast) window.RR_toast('Setup sent — the agent will apply it.'); hideFinishBar(); }
+      else { sfbApply.disabled = false; sfbMsg.innerHTML = 'No agent yet — start it in the terminal, then apply.'; }
+    }).catch(function (){ sfbApply.disabled = false; sfbMsg.textContent = 'Could not apply — try again.'; });
+  });
+
+  // Launch the chosen AI (Claude/Codex/Gemini) in the integrated terminal (work mode only). We snapshot the
+  // answers, launch the agent, then CLOSE the modal so its blurred backdrop stops covering
+  // the terminal (a first-run login must be typed there) — the floating bar finishes it.
+  launchWrap.addEventListener('click', function (e){
+    var b = e.target.closest('[data-rr-agent]'); if (!b) return;
+    var name = b.getAttribute('data-rr-agent');
+    if (window.RR_WORKMODE && typeof window.RR_launchAgent === 'function') {
+      pendingProf = assemble();
+      window.RR_launchAgent(name);
+      closeModal(setupModal);
+      showFinishBar(name);
+    } else {
+      flash('Launching agents needs work mode — run it from ReadingRoom.app, or start `' + name + '` in your terminal.');
+    }
+  });
+
+  function flash(msg){
+    if (window.RR_toast) { window.RR_toast(msg); return; }
+    var box = bodyEl.querySelector('.rr-q-note') || (function (){ var n = document.createElement('p'); n.className = 'rr-q-note'; bodyEl.appendChild(n); return n; })();
+    box.textContent = msg;
+  }
+
+  finishBtn.addEventListener('click', function (){
+    var prof = assemble();
+    if (window.RR_WORKMODE) {
+      finishBtn.disabled = true;
+      // auto-run /setup in the terminal where you launched the AI — without opening or
+      // raising the drawer. Needs a running agent (hence the note + guard).
+      postIntakeThenSetup(prof).then(function (sent){
+        finishBtn.disabled = false;
+        if (sent) closeModal(setupModal);
+        else flash('Launch an AI (Claude, Codex, or Gemini) first (button below), then press Finish.');
+      }).catch(function (){ finishBtn.disabled = false; showManual(prof); });
+    } else {
+      showManual(prof);
+    }
+  });
+
+  // static-site fallback: show the assembled profile + how to apply it
+  function showManual(prof){
+    launchWrap.hidden = true; finishBtn.hidden = true; nextBtn.hidden = true; backBtn.hidden = true;
+    stepEl.textContent = 'Review';
+    bodyEl.innerHTML =
+      '<p class="rr-q-hint">This couldn’t be applied automatically (work mode isn’t running, or saving failed). '
+      + 'Open <b>ReadingRoom.app</b> (work mode) and use Setup there, or paste this into <code>profile.json</code> '
+      + 'and run <code>/setup</code> in your AI assistant to adapt your commands.</p>'
+      + '<pre class="rr-q-json" id="rr-q-json">' + esc(JSON.stringify(prof, null, 2)) + '</pre>'
+      + '<button type="button" class="rr-btn rr-btn-ghost" id="rr-q-copy">Copy</button>';
+    var cp = document.getElementById('rr-q-copy');
+    cp.addEventListener('click', function (){
+      var t = JSON.stringify(prof, null, 2);
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function (){ cp.textContent = 'Copied ✓'; }, function (){});
+    });
+  }
+
+  /* -------------------------------------------------------------- tutorial */
+  // A bigger, stepped walkthrough (same family as Setup). Auto-opens on first launch
+  // and hands off to Setup; re-openable from the avatar menu. Image steps show real
+  // screenshots (assets/shots/, {{ASSET_ROOT}} resolved per page depth by build.py);
+  // the GIF steps are still placeholders. Step text is authored/trusted (<b>/<code> ok).
+  var TUTORIAL = [
+    { shot:'image', img:'{{ASSET_ROOT}}assets/shots/catalogue.png',
+      cap:'The catalogue: your papers as cards, with search and tag filters.',
+      title:'Welcome to {{SITE_TITLE}}',
+      body:'{{SITE_TITLE}} turns a paper into a focused, multi-tab breakdown and keeps it in a fast, searchable catalogue you own — generated in your AI coding session, no API.' },
+    { shot:'gif', cap:'Running <code>/explain-paper</code>, approving the outline, then the report builds.',
+      title:'Add a paper',
+      body:'In your AI assistant (Claude, Codex, or Gemini) run <code>/explain-paper &lt;arxiv-id&gt;</code> (or a PDF path). It reads the paper, proposes a short outline you approve, then writes the report and builds the page — no manual build step.',
+      body2:'Tune each report with flags: <code>--depth skim|standard|deep</code>, <code>--audience peer|newcomer</code>, <code>--views summary,math,results</code> to pick sections, <code>--focus "the stability proof"</code> to lean on one thing, and <code>--approve</code> to skip the approval gate.' },
+    { shot:'image', img:'{{ASSET_ROOT}}assets/shots/report.png',
+      cap:'A report page: focus-view tabs, real LaTeX, and results tables.',
+      title:'Read it your way',
+      body:'Every paper gets tabs — Summary, Method &amp; math, Results, Significance… — pitched to your field. Set a reading status and a star priority right on the page.' },
+    { shot:'image', img:'{{ASSET_ROOT}}assets/shots/library.png',
+      cap:'The Library with collection chips and one-click BibTeX export.',
+      title:'Organize &amp; cite',
+      body:'Add your own <b>custom tags</b> to group papers into collections (a project name, “to-cite”…). On the <b>Library</b>, click a collection to filter it, then export its <b>BibTeX</b> in one click.',
+      body2:'Run <code>/refresh-venues</code> to review whether your arXiv preprints have since been published — it checks DBLP and updates the venue + BibTeX to the journal/conference entry, keeping the arXiv link for reading.' },
+    { shot:'image', img:'{{ASSET_ROOT}}assets/shots/graph.png',
+      cap:'The connections graph: papers linked by citation, with ghost suggestions.',
+      title:'Follow the connections',
+      body:'The graph links your papers by citation and surfaces <b>ghost</b> nodes — important references worth analyzing next.' },
+    { shot:'gif', cap:'The work-mode app: integrated AI terminal, discuss and deep-dive.',
+      title:'Discuss &amp; go deeper (work mode)',
+      body:'Run it as a local desktop app: an integrated AI terminal sits in a bottom drawer with <b>live rebuilds</b>, so a new report appears the moment you finish. Opening a paper auto-opens the terminal, ready to work on that paper, and you can read the PDF inside the app.',
+      body2:'<b>Discuss</b> a paper conversationally (<code>/learn</code>) and save the chat, add a worked <b>Deep dive</b> — a full proof or derivation (<code>/deep-dive</code>), or put two or three papers side by side (<code>/compare</code>). It runs on your machine only (loopback), and you still approve every step the AI takes.' },
+    { shot:'image', img:'{{ASSET_ROOT}}assets/shots/setup.png',
+      cap:'The Setup questionnaire — field, focus views, and defaults.',
+      title:'Make it yours',
+      body:'Last thing: set up your profile and field so every report is tailored to you. Let’s do that now.' },
+  ];
+  var tutToSetup = false, tutIdx = 0;
+  var tutBody = document.getElementById('rr-tut-body');
+  var tutStep = document.getElementById('rr-tut-step');
+  var tutBar  = document.getElementById('rr-tut-bar');
+  var tutBack = document.getElementById('rr-tut-back');
+  var tutNext = document.getElementById('rr-tut-next');
+  var tutSkip = document.getElementById('rr-tut-skip');
+  var tutFinish = document.getElementById('rr-tut-finish');
+
+  function renderTut(){
+    var last = tutIdx === TUTORIAL.length - 1;
+    var s = TUTORIAL[tutIdx];
+    // a step with `img` shows the real screenshot; otherwise the styled placeholder box
+    var media = s.img
+      ? '<img class="rr-tut-img" src="' + s.img + '" alt="" loading="lazy">'
+      : '<div class="rr-tut-shot-box">' + (s.shot === 'gif' ? '<span class="rr-tut-play" aria-hidden="true">&#9658;</span>' : '')
+        + '<span class="rr-tut-shot-badge">' + (s.shot === 'gif' ? 'GIF' : 'Image') + ' coming soon</span></div>';
+    tutBody.innerHTML =
+      '<figure class="rr-tut-shot rr-tut-shot--' + s.shot + '">'
+      + media
+      + '<figcaption>' + s.cap + '</figcaption></figure>'
+      + '<h3 class="rr-tut-h">' + s.title + '</h3>'
+      + '<p class="rr-tut-p">' + s.body + '</p>'
+      + (s.body2 ? '<p class="rr-tut-p">' + s.body2 + '</p>' : '');
+    tutStep.textContent = 'Step ' + (tutIdx + 1) + ' of ' + TUTORIAL.length;
+    tutBar.style.width = Math.round(((tutIdx + 1) / TUTORIAL.length) * 100) + '%';
+    tutBack.disabled = tutIdx === 0;
+    tutNext.hidden = last;
+    tutSkip.hidden = last;             // on the last step, "Set up your profile →" replaces Skip/Next
+    tutFinish.hidden = !last;
+  }
+  function openTutorial(toSetup){
+    if (autoOpenTimer) { clearTimeout(autoOpenTimer); autoOpenTimer = null; }
+    tutToSetup = !!toSetup; tutIdx = 0; renderTut(); openModal(tutorialModal);
+  }
+  tutBack.addEventListener('click', function (){ if (tutIdx > 0) { tutIdx--; renderTut(); } });
+  tutNext.addEventListener('click', function (){ if (tutIdx < TUTORIAL.length - 1) { tutIdx++; renderTut(); } });
+  tutSkip.addEventListener('click', function (){ closeModal(tutorialModal); });        // closeModal marks seen + chains
+  // "Set up your profile →" must open Setup from EVERY path (avatar menu too),
+  // not only on the first-run auto-open — closeModal chains when tutToSetup is set.
+  tutFinish.addEventListener('click', function (){ tutToSetup = true; closeModal(tutorialModal); });
+
+  /* ----------------------------------------------------- first-run onboarding */
+  // First visit (tutorial not seen yet)? Open the tutorial, which on close hands off to
+  // Setup. One-shot, remembered in localStorage (set when the tutorial closes).
+  (function (){
+    var seen = false; try { seen = localStorage.getItem('rr-tutorial-seen') === '1'; } catch (e) {}
+    if (!seen) autoOpenTimer = setTimeout(function (){ openTutorial(true); }, 500);
+  })();
+})();
+</script>

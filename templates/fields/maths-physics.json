@@ -1,0 +1,31 @@
+{
+  "field": "maths-physics",
+  "label": "Maths & Physics",
+  "tags": [
+    "analysis",
+    "algebra",
+    "geometry-topology",
+    "probability",
+    "dynamical-systems",
+    "differential-equations",
+    "numerical-methods",
+    "mathematical-physics",
+    "quantum",
+    "statistical-physics",
+    "theory",
+    "computation"
+  ],
+  "max_tags": 4,
+  "sections": [
+    {"key": "summary", "title": "Summary"},
+    {"key": "math", "title": "Theory & proofs"},
+    {"key": "architecture", "title": "Setup & framework"},
+    {"key": "results", "title": "Results & examples"},
+    {"key": "significance", "title": "Novelty & significance"},
+    {"key": "reproducibility", "title": "Reproducibility"}
+  ],
+  "required_sections": ["summary", "significance"],
+  "lens": "the theorems, definitions and derivations — the rigorous core; state assumptions and prove/derive the key results rather than quoting them, and over-invest here",
+  "lens_key": "math",
+  "tone": "assume a maths/physics PhD peer; use LaTeX for all mathematics"
+}

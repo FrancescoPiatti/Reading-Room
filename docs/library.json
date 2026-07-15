@@ -1,0 +1,35 @@
+[
+  {
+    "id": "1706.03762",
+    "title": "Attention Is All You Need",
+    "authors": "Ashish Vaswani et al.",
+    "year": 2017,
+    "venue": "NeurIPS 2017",
+    "status": "to-read",
+    "tags": [
+      "deep-learning",
+      "natural-language-processing",
+      "efficiency"
+    ],
+    "primary_tag": "deep-learning",
+    "bibkey": "vaswani2017attention",
+    "bibtex": "@inproceedings{vaswani2017attention,\n  title = {Attention Is All You Need},\n  author = {Ashish Vaswani and Noam Shazeer and Niki Parmar and Jakob Uszkoreit and Llion Jones and Aidan N. Gomez and Łukasz Kaiser and Illia Polosukhin},\n  booktitle = {Advances in Neural Information Processing Systems 30 (NIPS 2017)},\n  year = {2017},\n  url = {https://arxiv.org/abs/1706.03762}\n}",
+    "url": "papers/1706.03762/index.html"
+  },
+  {
+    "id": "hornik1989",
+    "title": "Multilayer Feedforward Networks are Universal Approximators",
+    "authors": "Kurt Hornik, Maxwell Stinchcombe, Halbert White",
+    "year": 1989,
+    "venue": "Neural Networks 2(5)",
+    "status": "to-read",
+    "tags": [
+      "deep-learning",
+      "theory"
+    ],
+    "primary_tag": "deep-learning",
+    "bibkey": "hornik1989multilayer",
+    "bibtex": "@article{DBLP:journals/nn/HornikSW89,\n  author    = {Kurt Hornik and Maxwell B. Stinchcombe and Halbert White},\n  title     = {Multilayer feedforward networks are universal approximators},\n  journal   = {Neural Networks},\n  volume    = {2},\n  number    = {5},\n  pages     = {359--366},\n  year      = {1989},\n  url       = {https://doi.org/10.1016/0893-6080(89)90020-8},\n  doi       = {10.1016/0893-6080(89)90020-8}\n}",
+    "url": "papers/hornik1989/index.html"
+  }
+]

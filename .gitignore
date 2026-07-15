@@ -1,0 +1,47 @@
+# NOTE: docs/ is deliberately NOT ignored — it's the generated site, and GitHub
+# Pages serves it straight from the repo (Settings → Pages → folder /docs).
+
+# downloaded PDFs (often large / copyrighted — keep out of git), but keep the dir
+# itself so a fresh clone has somewhere to download into (.gitkeep is tracked)
+papers/*.pdf
+!papers/.gitkeep
+
+# extracted text / scratch — never keep these next to the PDFs
+papers/*.txt
+.cache/*
+!.cache/.gitkeep
+
+# python
+__pycache__/
+*.pyc
+.DS_Store
+
+# work-mode (local Node server) deps — not needed for the static build
+workmode/node_modules/
+npm-debug.log*
+
+# work-mode runtime artifacts (background server log/pid, install log)
+workmode/*.log
+workmode/workmode.pid
+
+# in-app Setup hands answers to the /setup skill via this staging file
+.setup-intake.json
+
+# user config & reading state (profile, dismissals, field config, intake) — gitignored
+# so app updates (git pull / npm / Tauri-Electron) never overwrite the user's settings.
+# Shipped defaults live in profile.example.json / config.example.json (committed).
+user/
+!user/.gitkeep
+
+# showcase website (copied into the separate GitHub personal site; not part of this repo)
+website/
+
+# internal planning notes / reports — local only, not part of the shipped repo
+notes/
+
+# archive.py backup zips (your data — keep them out of the code repo)
+backups/
+
+# Claude Code per-user local state (not for the shared template)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

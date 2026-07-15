@@ -1,0 +1,29 @@
+{
+  "field": "bio",
+  "label": "Biology & life sciences",
+  "tags": [
+    "genomics",
+    "proteomics",
+    "cell-biology",
+    "neuroscience",
+    "imaging",
+    "clinical-trials",
+    "statistical-genetics",
+    "methods",
+    "theory",
+    "reproducibility"
+  ],
+  "max_tags": 4,
+  "sections": [
+    {"key": "summary", "title": "Summary"},
+    {"key": "math", "title": "Methods & statistics"},
+    {"key": "architecture", "title": "Experimental design"},
+    {"key": "results", "title": "Results"},
+    {"key": "significance", "title": "Significance & limitations"},
+    {"key": "reproducibility", "title": "Data & reproducibility"}
+  ],
+  "required_sections": ["summary", "significance"],
+  "lens": "the experimental design, controls, and statistical validity — over-invest here",
+  "lens_key": "math",
+  "tone": "assume a domain scientist; define assays/methods; use precise units; LaTeX for any statistics"
+}

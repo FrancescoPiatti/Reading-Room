@@ -1,0 +1,151 @@
+#!/bin/bash
+# ============================================================================
+# Reading Room — macOS .app launcher (zero windows).
+#
+# This is the executable inside ReadingRoom.app. Double-clicking the app runs it
+# WITHOUT opening any Terminal window: it starts the local "work mode" server and
+# the server opens the chromeless app window itself. Errors are shown as a native
+# dialog (there's no console to print to).
+#
+# IMPORTANT: the server must run as this script's CHILD, with this script alive
+# for the whole session (`wait`). Detaching it (nohup … & + exit 0) does NOT work
+# from an .app: the moment the main executable exits, launchd tears down the
+# app's process group and kills the server before it can even write a log line —
+# double-click then silently does nothing. LSUIElement in Info.plist keeps the
+# running app out of the Dock, so staying alive shows no UI either way.
+#
+# The server auto-quits a few seconds after the app window closes, which ends
+# this script too. Logs: workmode/workmode.log; pid: workmode/workmode.pid
+# (force-stop with `kill $(cat workmode/workmode.pid)`).
+#
+# The static GitHub Pages browse path is unaffected; this only runs things locally.
+# ============================================================================
+
+# Repo root = three levels up from Contents/MacOS/ (…/ReadingRoom.app/Contents/MacOS)
+REPO="$(cd "$(dirname "$0")/../../.." && pwd)" || exit 1
+cd "$REPO" || exit 1
+
+# Show a native error dialog (no console exists for an .app launch) and quit.
+die() {
+  /usr/bin/osascript -e "display dialog \"Reading Room\n\n$1\" buttons {\"OK\"} default button 1 with icon caution with title \"Reading Room\"" >/dev/null 2>&1
+  exit 1
+}
+
+# --- pre-flight: can this app actually READ its own files? -------------------
+# When the repo lives in a macOS-protected location (OneDrive/iCloud CloudStorage,
+# Desktop, Documents, Downloads), TCC gates file access PER APP. Terminal usually
+# has the grant; a double-clicked .app has its own — and when it's missing, reads
+# fail with EPERM and the server dies before writing a single log line, so
+# double-click silently does nothing. Detect that here and walk the user through
+# the one-time grant instead. (Updating the app changes its TCC identity, so the
+# grant may need re-doing after an update — same dialog, same 10 seconds.)
+if ! cat "$REPO/workmode/package.json" >/dev/null 2>&1; then
+  BTN="$(/usr/bin/osascript -e 'button returned of (display dialog "Reading Room\n\nmacOS is blocking this app from reading its own folder (it lives in a protected location — OneDrive, Desktop or Documents).\n\nGrant access once in System Settings → Privacy & Security:\n• Files & Folders → ReadingRoom → allow the folder, or\n• Full Disk Access → + → add ReadingRoom.app\n\nThen open Reading Room again." buttons {"OK", "Open System Settings"} default button "Open System Settings" with icon caution with title "Reading Room")' 2>/dev/null)"
+  [ "$BTN" = "Open System Settings" ] && open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" >/dev/null 2>&1
+  exit 1
+fi
+
+# First run only: offer to put a shortcut on the Desktop (or a folder the reader
+# picks). A plain symlink — no Finder automation, so no permission prompts.
+offer_shortcut() {
+  MARKER="$REPO/user/.desktop-shortcut-offered"
+  [ -f "$MARKER" ] && return 0
+  mkdir -p "$REPO/user" && : >"$MARKER"   # one-shot, whatever they choose
+  BTN="$(/usr/bin/osascript -e 'button returned of (display dialog "Add a Reading Room shortcut to your Desktop?\n\nYou can move it anywhere later — it is just a link to this app." buttons {"Not now", "Choose folder…", "Add to Desktop"} default button "Add to Desktop" with title "Reading Room" with icon note)' 2>/dev/null)"
+  DEST=""
+  case "$BTN" in
+    "Add to Desktop") DEST="$HOME/Desktop" ;;
+    "Choose folder…") DEST="$(/usr/bin/osascript -e 'POSIX path of (choose folder with prompt "Where should the Reading Room shortcut go?")' 2>/dev/null)" ;;
+    *) return 0 ;;
+  esac
+  if [ -n "$DEST" ] && [ -d "$DEST" ]; then
+    ln -sfn "$REPO/ReadingRoom.app" "${DEST%/}/Reading Room.app" 2>/dev/null \
+      && /usr/bin/osascript -e 'display notification "Shortcut added." with title "Reading Room"' >/dev/null 2>&1
+  fi
+}
+
+# --- locate Node (an .app launch starts with a minimal PATH) -----------------
+# Probe the usual install locations FIRST — instant and side-effect-free. Only
+# if that fails, fall back to sourcing shell profiles, which can be slow or even
+# hang here (e.g. a conda init hook waiting in a non-interactive context).
+have_node() { command -v node >/dev/null 2>&1; }
+
+if ! have_node; then
+  for p in /opt/homebrew/bin /usr/local/bin "$HOME/.volta/bin"; do
+    [ -x "$p/node" ] && export PATH="$p:$PATH"
+  done
+  for n in "$HOME"/.nvm/versions/node/*/bin "$HOME"/.fnm/node-versions/*/installation/bin; do
+    [ -x "$n/node" ] && export PATH="$n:$PATH"
+  done
+fi
+if ! have_node; then
+  for f in "$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile"; do
+    [ -f "$f" ] && . "$f" >/dev/null 2>&1
+    have_node && break
+  done
+fi
+if ! have_node; then
+  if [ -s "$HOME/.nvm/nvm.sh" ]; then
+    . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1
+    nvm use --silent default >/dev/null 2>&1 || nvm use --silent node >/dev/null 2>&1
+  fi
+fi
+
+if ! have_node; then
+  open "https://nodejs.org/en/download" >/dev/null 2>&1
+  die "Node.js is required for work mode but was not found. Install it from nodejs.org (or: brew install node), then open Reading Room again."
+fi
+
+# --- require Node >= 18 up front (a too-old Node would fail cryptically
+#     halfway through npm install instead of with a clear message) -----------
+NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)"
+case "$NODE_MAJOR" in
+  ''|*[!0-9]*)
+    die "Could not determine your Node.js version (node -v failed). Reinstall Node 18 or newer from nodejs.org, then open Reading Room again." ;;
+esac
+if [ "$NODE_MAJOR" -lt 18 ]; then
+  open "https://nodejs.org/en/download" >/dev/null 2>&1
+  die "Work mode needs Node.js 18 or newer — found $(node -v). Update it from nodejs.org (or: brew upgrade node), then open Reading Room again."
+fi
+
+# --- install work-mode dependencies on first run ----------------------------
+if [ ! -d "workmode/node_modules" ]; then
+  ( cd workmode && npm install ) >"$REPO/workmode/install.log" 2>&1 \
+    || die "Installing work-mode dependencies failed. See workmode/install.log for details."
+fi
+
+# --- already running? then there's nothing to do (its window is open) -------
+# The pid must actually be OUR server — a recycled pid from a stale file would
+# otherwise make double-click silently do nothing.
+PIDFILE="$REPO/workmode/workmode.pid"
+OLDPID="$(cat "$PIDFILE" 2>/dev/null)"
+if [ -n "$OLDPID" ] && ps -p "$OLDPID" -o command= 2>/dev/null | grep -q "server\.js"; then
+  exit 0
+fi
+
+# --- start the server as our child and stay alive for the session -----------
+LOG="$REPO/workmode/workmode.log"
+cd "$REPO/workmode" || die "The workmode/ folder is missing."
+node server.js >"$LOG" 2>&1 &
+SRV=$!
+echo "$SRV" >"$PIDFILE"
+
+# If the server dies in its first seconds (port trouble, a broken update, …),
+# say why instead of failing silently.
+sleep 3
+if ! kill -0 "$SRV" 2>/dev/null; then
+  ERR="$(tail -n 3 "$LOG" 2>/dev/null | tr '"\\' "' ")"
+  rm -f "$PIDFILE"
+  # Died without writing a single log line = blocked by macOS file permissions
+  # (per-file TCC can pass the pre-flight read yet still deny other files).
+  if [ -z "$ERR" ]; then
+    die "macOS blocked the work-mode server before it could write a single log line.\n\nGrant access once in System Settings → Privacy & Security → Full Disk Access: click +, add ReadingRoom.app, then open Reading Room again."
+  fi
+  die "The work-mode server failed to start.\n\n$ERR\n\nFull log: workmode/workmode.log"
+fi
+
+offer_shortcut
+
+wait "$SRV"
+rm -f "$PIDFILE"
+exit 0

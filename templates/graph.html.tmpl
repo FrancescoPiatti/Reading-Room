@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connections — {{SITE_TITLE}}</title>
+<script>
+  /* set theme before paint to avoid a flash of the wrong theme; light is default */
+  (function () {
+    try { if (localStorage.getItem('rr-theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark'); } catch (e) {}
+  })();
+</script>
+<style>
+/* fonts are self-hosted (assets/fonts/, via the inlined @font-face rules below) */
+{{BASE_CSS}}
+</style>
+</head>
+<body class="graph">
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html">{{SITE_TITLE}}</a>
+    <div class="topnav">
+      <a class="topnav-link" href="index.html">Catalogue</a>
+      <a class="topnav-link" href="library.html">Library</a>
+      <a class="topnav-link" href="graph.html" aria-current="page">Connections</a>
+      <button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle light / dark theme">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <header>
+    <p class="eyebrow">Citation graph</p>
+    <h1 class="title">Connections</h1>
+    <p class="byline">How the papers in your library cite one another. Solid nodes are analyzed papers (click to open the report); hollow nodes are references cited by two or more of your papers but not yet analyzed (click to open on arXiv). Node size reflects how often a paper is cited within your library.</p>
+  </header>
+
+  <div class="legend" id="legend" aria-label="Filter by primary tag"></div>
+
+  <div class="stage">
+    <svg id="graph" role="img" aria-label="Citation graph of the library"></svg>
+    <div class="stage-empty" id="empty" hidden></div>
+    <div class="tip" id="tip" role="status"></div>
+  </div>
+
+  <section class="queue" id="queue"></section>
+
+  <footer class="foot">
+    <a class="back" href="index.html">← {{SITE_TITLE}}</a>
+    <span id="stat"></span>
+  </footer>
+</main>
+
+<script src="assets/vendor/d3.min.js"></script>
+<script>
+const GRAPH = {{GRAPH_JSON}};
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function trunc(s, n){ s = String(s||''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+const stat = document.getElementById('stat');
+const papers = GRAPH.nodes.filter(n => n.type === 'paper').length;
+const ghosts = GRAPH.nodes.length - papers;
+stat.textContent = papers + ' paper' + (papers === 1 ? '' : 's')
+  + (ghosts ? ' · ' + ghosts + ' referenced' : '') + ' · ' + GRAPH.links.length + ' citation' + (GRAPH.links.length === 1 ? '' : 's');
+
+/* ---- empty state — rendered whether or not the graph library loads ---- */
+const emptyEl = document.getElementById('empty');
+if (!GRAPH.links.length){
+  emptyEl.hidden = false;
+  if (GRAPH.nodes.length) emptyEl.classList.add('stage-empty--footer');  // don't overlap drawn nodes
+  emptyEl.innerHTML = GRAPH.nodes.length === 0
+    ? 'No papers yet — add your first with <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant (Claude, Codex, or Gemini).'
+    : GRAPH.nodes.length === 1
+    ? 'One paper so far. Connections appear once papers in your library cite each other — analyze one of its references (see the reading queue below) to draw the first edge.'
+    : 'No internal citations yet. Edges appear when one analyzed paper cites another (or two share a reference).';
+}
+
+/* ---- force graph — everything below needs the vendored D3 ---- */
+(function () {
+if (typeof d3 === 'undefined') {
+  emptyEl.hidden = false;
+  emptyEl.textContent = 'The graph library failed to load (assets/vendor/d3.min.js), so the map can’t be drawn — the reading queue below still works.';
+  return;
+}
+
+// categorical palette for primary tags — mid-tone hues legible on both themes
+const PALETTE = ['#2a52d6','#0f9d8a','#d6612a','#8a4fd6','#c0392b','#2a8ad6','#b8902a','#3aa655','#d62a7a','#5a6270'];
+const color = d3.scaleOrdinal().domain(GRAPH.tags).range(PALETTE);
+function nodeColor(n){ return n.type === 'ghost' ? null : (n.tag ? color(n.tag) : 'var(--ink-faint)'); }
+
+/* ---- legend / tag filter ---- */
+const legendEl = document.getElementById('legend');
+let activeTag = null;
+legendEl.innerHTML = GRAPH.tags.map(t =>
+  `<button class="chip" data-tag="${esc(t)}" aria-pressed="false"><span class="swatch" style="--c:${color(t)}"></span>${esc(t)}</button>`
+).join('') + (GRAPH.tags.length ? '<span class="legend-note">click a tag to highlight</span>' : '');
+
+const svg = d3.select('#graph');
+const tipEl = document.getElementById('tip');
+const stage = svg.node().parentNode;
+
+let W = svg.node().clientWidth || 900;
+let H = svg.node().clientHeight || 580;
+
+const maxIn = d3.max(GRAPH.nodes, d => d.indegree) || 0;
+const rscale = d3.scaleSqrt().domain([0, Math.max(1, maxIn)]).range([7, 22]);
+const radius = d => rscale(d.indegree || 0);
+
+svg.append('defs').append('marker')
+  .attr('id', 'arrow').attr('viewBox', '0 -5 10 10')
+  .attr('refX', 9).attr('refY', 0).attr('markerWidth', 6).attr('markerHeight', 6)
+  .attr('orient', 'auto')
+  .append('path').attr('class', 'arrow').attr('d', 'M0,-4L8,0L0,4');
+
+const root = svg.append('g');
+svg.call(d3.zoom().scaleExtent([0.3, 4]).on('zoom', e => root.attr('transform', e.transform)));
+
+const link = root.append('g').selectAll('line')
+  .data(GRAPH.links).join('line')
+  .attr('class', 'link').attr('marker-end', 'url(#arrow)');
+
+const node = root.append('g').selectAll('g')
+  .data(GRAPH.nodes).join('g')
+  .attr('class', d => 'node ' + d.type)
+  .call(d3.drag()
+    .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+    .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y; })
+    .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+node.append('circle')
+  .attr('r', radius)
+  .attr('fill', d => nodeColor(d) || 'var(--bg-card)');
+
+node.append('text')
+  .attr('class', 'node-label')
+  .attr('x', d => radius(d) + 4).attr('y', 4)
+  .text(d => trunc(d.label, 34));
+
+node.style('cursor', 'pointer').on('click', (e, d) => { window.location.href = d.url; });
+
+/* neighbor highlighting */
+const adj = new Map(GRAPH.nodes.map(n => [n.id, new Set([n.id])]));
+GRAPH.links.forEach(l => {
+  const s = typeof l.source === 'object' ? l.source.id : l.source;
+  const t = typeof l.target === 'object' ? l.target.id : l.target;
+  adj.get(s).add(t); adj.get(t).add(s);
+});
+const idOf = x => (typeof x === 'object' ? x.id : x);
+
+function applyKeep(keep){
+  node.classed('faded', d => !keep(d.id));
+  link.classed('faded', d => !(keep(idOf(d.source)) && keep(idOf(d.target))));
+}
+function applyTag(){
+  if (!activeTag){ node.classed('faded', false); link.classed('faded', false); return; }
+  const base = new Set(GRAPH.nodes.filter(n => n.tag === activeTag).map(n => n.id));
+  const keepSet = new Set();
+  base.forEach(id => adj.get(id).forEach(x => keepSet.add(x)));
+  applyKeep(id => keepSet.has(id));
+}
+
+node.on('mouseenter', (e, d) => {
+    const nb = adj.get(d.id);
+    applyKeep(id => nb.has(id));
+    tipEl.innerHTML = `<div class="t-title">${esc(d.label)}</div><div class="t-meta">`
+      + (d.type === 'ghost'
+          ? 'referenced · cited by ' + d.cited_by + ' of your papers'
+          : [d.authors, d.year].filter(Boolean).join(' · ') + (d.indegree ? ' · cited by ' + d.indegree : ''))
+      + '</div>';
+    tipEl.classList.add('show');
+  })
+  .on('mousemove', (e) => {
+    const r = stage.getBoundingClientRect();
+    let x = e.clientX - r.left + 14, y = e.clientY - r.top + 14;
+    x = Math.min(x, r.width - tipEl.offsetWidth - 8);
+    tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+  })
+  .on('mouseleave', () => { tipEl.classList.remove('show'); applyTag(); });
+
+legendEl.querySelectorAll('.chip').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const t = btn.dataset.tag;
+    activeTag = (activeTag === t) ? null : t;
+    legendEl.querySelectorAll('.chip').forEach(b =>
+      b.setAttribute('aria-pressed', b.dataset.tag === activeTag ? 'true' : 'false'));
+    applyTag();
+  });
+});
+
+const sim = d3.forceSimulation(GRAPH.nodes)
+  .force('link', d3.forceLink(GRAPH.links).id(d => d.id).distance(110).strength(0.6))
+  .force('charge', d3.forceManyBody().strength(-320))
+  .force('center', d3.forceCenter(W / 2, H / 2))
+  .force('collide', d3.forceCollide().radius(d => radius(d) + 8))
+  .on('tick', tick);
+
+function endpoint(d){
+  const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y;
+  const len = Math.hypot(dx, dy) || 1, r = radius(d.target) + 4;
+  return { x: d.target.x - dx / len * r, y: d.target.y - dy / len * r };
+}
+function tick(){
+  link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => endpoint(d).x).attr('y2', d => endpoint(d).y);
+  node.attr('transform', d => `translate(${d.x},${d.y})`);
+}
+
+function resize(){
+  W = svg.node().clientWidth || W;
+  sim.force('center', d3.forceCenter(W / 2, H / 2)); sim.alpha(0.3).restart();
+}
+window.addEventListener('resize', resize);
+})();   /* end of the d3-dependent block */
+
+/* ---- reading queue ---- */
+const queueEl = document.getElementById('queue');
+if (GRAPH.queue.length){
+  queueEl.innerHTML = '<h2>Reading queue</h2>'
+    + '<p class="sub">References cited by your library that you haven’t analyzed yet — most-cited first. Two or more citations promotes a reference into the graph above.</p>'
+    + '<ul class="qlist">' + GRAPH.queue.map(q => {
+        const title = q.title ? esc(q.title) : '<em>untitled reference</em>';
+        return `<li class="qitem">
+          <span class="q-cited${q.in_graph ? ' in-graph' : ''}">cited ×${q.cited_by}</span>
+          <span class="q-title"><a href="https://arxiv.org/abs/${esc(q.id)}">${title}</a><span class="q-id">${esc(q.id)}</span></span>
+        </li>`;
+      }).join('') + '</ul>';
+}
+
+/* ---- theme toggle ---- */
+(function () {
+  var rootEl = document.documentElement;
+  var btn = document.querySelector('.theme-toggle');
+  if (!btn) return;
+  function sync(){ btn.setAttribute('aria-pressed', rootEl.getAttribute('data-theme') === 'dark' ? 'true' : 'false'); }
+  sync();
+  btn.addEventListener('click', function () {
+    var dark = rootEl.getAttribute('data-theme') === 'dark';
+    if (dark) { rootEl.removeAttribute('data-theme'); } else { rootEl.setAttribute('data-theme', 'dark'); }
+    try { localStorage.setItem('rr-theme', dark ? 'light' : 'dark'); } catch (e) {}
+    sync();
+  });
+})();
+</script>
+</body>
+</html>

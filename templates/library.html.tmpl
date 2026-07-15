@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Library — {{SITE_TITLE}}</title>
+<script>
+  /* set theme before paint to avoid a flash of the wrong theme; light is default */
+  (function () {
+    try { if (localStorage.getItem('rr-theme') === 'dark') document.documentElement.setAttribute('data-theme', 'dark'); } catch (e) {}
+  })();
+</script>
+<style>
+/* fonts are self-hosted (assets/fonts/, via the inlined @font-face rules below) */
+{{BASE_CSS}}
+</style>
+</head>
+<body class="library">
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="index.html">{{SITE_TITLE}}</a>
+    <div class="topnav">
+      <a class="topnav-link" href="index.html">Catalogue</a>
+      <a class="topnav-link" href="library.html" aria-current="page">Library</a>
+      <a class="topnav-link" href="graph.html">Connections</a>
+      <button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle light / dark theme">
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <header>
+    <p class="eyebrow">Library</p>
+    <h1 class="title">Library</h1>
+    <p class="byline">Every analyzed paper in one list. Add your own tags to group papers into collections (like a project), then select rows and export BibTeX.</p>
+    {{PROFILE_LINE}}
+  </header>
+
+  <div class="lib-bar">
+    <input class="search" id="q" type="search" placeholder="Filter by title, author, venue, tag…" aria-label="Filter papers" autocomplete="off">
+    <label class="lib-group">Group by
+      <select id="groupby">
+        <option value="">Nothing</option>
+        <option value="custom">Collection (your tags)</option>
+        <option value="primary_tag">Topic tag</option>
+        <option value="year">Year</option>
+        <option value="status">Status</option>
+        <option value="venue">Venue</option>
+      </select>
+    </label>
+  </div>
+
+  <!-- collections = your custom tags. Click one to filter the list to that collection. -->
+  <div class="lib-collections" id="collections" aria-label="Filter by collection (your custom tags)"></div>
+
+  <div class="lib-actions">
+    <label class="lib-check"><input type="checkbox" id="selall"> <span id="selcount">Select all</span></label>
+    <input class="lib-tagsel" id="tagsel" type="text" placeholder="Tag selected papers…" aria-label="Add a custom tag to the selected papers" disabled>
+    <span class="spacer"></span>
+    <button class="cite-btn" id="copybib" type="button">Copy BibTeX</button>
+    <button class="cite-btn" id="dlbib" type="button">Download .bib</button>
+  </div>
+
+  <div id="list" class="lib-list"></div>
+  <p class="empty" id="empty" hidden>No papers match that.</p>
+
+  <footer class="foot">
+    <a class="back" href="index.html">← {{SITE_TITLE}}</a>
+    <span id="stat"></span>
+  </footer>
+</main>
+
+<script>
+const LIBRARY = {{LIBRARY_JSON}};
+
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+const STATUS_LABELS = {'to-read':'To read','reading':'Reading','read':'Read'};
+
+const qEl = document.getElementById('q');
+const groupEl = document.getElementById('groupby');
+const listEl = document.getElementById('list');
+const emptyEl = document.getElementById('empty');
+const statEl = document.getElementById('stat');
+const selAll = document.getElementById('selall');
+const selCount = document.getElementById('selcount');
+const collEl = document.getElementById('collections');
+const tagselEl = document.getElementById('tagsel');
+
+const selected = new Set();
+let activeCollection = '';   // the custom tag currently used as a filter ('' = all)
+
+// effective status/priority: a localStorage override (set here or on a report) wins over the digest default
+function lsGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+// warn once if browser storage writes fail (quota full / private mode) — otherwise
+// status, priority, and collection edits would silently not persist
+let lsWarned = false;
+function lsWarn(){
+  if (lsWarned) return; lsWarned = true;
+  const n = document.createElement('div'); n.className = 'rr-lswarn'; n.setAttribute('role','status');
+  n.textContent = 'Couldn’t save to browser storage (full or blocked) — this change may not persist.';
+  document.body.appendChild(n); setTimeout(() => n.remove(), 6000);
+}
+function lsSet(k,v){ try { localStorage.setItem(k,v); } catch(e){ lsWarn(); } }
+function statusOf(p){ const o = lsGet('rr-status-'+p.id); if (o && STATUS_LABELS[o]) return o; return STATUS_LABELS[p.status] ? p.status : 'to-read'; }
+function prioOf(p){ const o = lsGet('rr-prio-'+p.id); if (o !== null) return parseInt(o,10) || 0; return p.priority || 0; }
+
+// custom tags (user-owned collections) — stored per paper in localStorage
+function customTagsOf(id){ try { const v = JSON.parse(lsGet('rr-tags-'+id) || '[]'); return Array.isArray(v) ? v : []; } catch(e){ return []; } }
+function setCustomTags(id, arr){
+  const u = []; const seen = {};
+  arr.map(t => String(t).trim()).filter(Boolean).forEach(t => { if (!seen[t.toLowerCase()]) { seen[t.toLowerCase()] = 1; u.push(t); } });
+  lsSet('rr-tags-'+id, JSON.stringify(u));
+}
+function addCustomTag(id, t){ const a = customTagsOf(id); a.push(t); setCustomTags(id, a); }
+function removeCustomTag(id, t){ setCustomTags(id, customTagsOf(id).filter(x => x !== t)); }
+function allCollections(){ const m = {}; LIBRARY.forEach(p => customTagsOf(p.id).forEach(t => { m[t] = (m[t]||0)+1; })); return m; }
+
+function visible(){
+  let list = LIBRARY.slice();
+  if (activeCollection) list = list.filter(p => customTagsOf(p.id).indexOf(activeCollection) !== -1);
+  const q = qEl.value.trim().toLowerCase();
+  if (q) list = list.filter(p =>
+    (p.title + ' ' + p.authors + ' ' + p.venue + ' ' + (p.tags||[]).join(' ') + ' ' + customTagsOf(p.id).join(' ')).toLowerCase().includes(q));
+  return list;
+}
+
+function row(p){
+  const checked = selected.has(p.id) ? ' checked' : '';
+  const meta = [p.authors, p.year, p.venue].filter(Boolean).map(esc).join(' · ');
+  const st = statusOf(p), pr = prioOf(p);
+  const opts = Object.keys(STATUS_LABELS).map(s =>
+    `<option value="${s}"${s===st?' selected':''}>${STATUS_LABELS[s]}</option>`).join('');
+  let stars = '';
+  for (let i=1;i<=3;i++) stars += `<button type="button" class="star${i<=pr?' on':''}" data-p="${i}" aria-label="set priority ${i}">★</button>`;
+  const ctags = customTagsOf(p.id).map(t =>
+    `<span class="lib-tag">${esc(t)}<button type="button" class="lib-tag-x" data-t="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button></span>`).join('');
+  return `<div class="lib-row" data-id="${esc(p.id)}">
+    <input type="checkbox" class="rowcheck" data-id="${esc(p.id)}"${checked} aria-label="Select ${esc(p.title)}">
+    <div class="lib-main">
+      <a class="lib-title" href="${esc(p.url)}">${esc(p.title)}</a>
+      <div class="lib-meta">${meta}</div>
+      <div class="lib-tags" data-id="${esc(p.id)}">${ctags}<input class="lib-tag-add" data-id="${esc(p.id)}" type="text" placeholder="+ tag" aria-label="Add a custom tag to ${esc(p.title)}"></div>
+    </div>
+    <span class="starrate" data-id="${esc(p.id)}">${stars}</span>
+    <select class="lib-sel st-${st}" data-id="${esc(p.id)}" aria-label="Reading status">${opts}</select>
+  </div>`;
+}
+
+function groupLabel(key, val){
+  if (key === 'status') return STATUS_LABELS[val] || val;
+  return val || '—';
+}
+function groupValue(p, key){ return key === 'status' ? statusOf(p) : (p[key] || '—'); }
+
+function groupHtml(name, count, rowsHtml){
+  return `<section class="lib-grp"><h2 class="lib-grp-h">${esc(name)} <span class="lib-grp-n">${count}</span></h2>`
+       + `<div class="lib-group-body">${rowsHtml}</div></section>`;
+}
+
+function render(){
+  const list = visible();
+  const key = groupEl.value;
+  if (list.length === 0) {
+    emptyEl.hidden = false;
+    emptyEl.innerHTML = LIBRARY.length === 0
+      ? 'No papers yet — add one with <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant (Claude, Codex, or Gemini) — it builds the page for you.'
+      : (activeCollection ? 'No papers in this collection match that.' : 'No papers match that.');
+  } else {
+    emptyEl.hidden = true;
+  }
+
+  if (!key){
+    listEl.innerHTML = `<div class="lib-group-body">${list.map(row).join('')}</div>`;
+  } else if (key === 'custom'){
+    // a paper can belong to several collections, so it appears under each of its tags
+    const groups = {};
+    list.forEach(p => {
+      const ts = customTagsOf(p.id);
+      if (!ts.length) (groups['— untagged'] = groups['— untagged'] || []).push(p);
+      else ts.forEach(t => (groups[t] = groups[t] || []).push(p));
+    });
+    const keys = Object.keys(groups).sort((a,b) => a === '— untagged' ? 1 : b === '— untagged' ? -1 : a.localeCompare(b));
+    listEl.innerHTML = keys.map(g => groupHtml(g, groups[g].length, groups[g].map(row).join(''))).join('');
+  } else {
+    const groups = {};
+    list.forEach(p => { const g = groupValue(p, key); (groups[g] = groups[g] || []).push(p); });
+    const keys = Object.keys(groups).sort((a,b) => key === 'year' ? (b - a) : a.localeCompare(b));
+    listEl.innerHTML = keys.map(g => groupHtml(groupLabel(key, g), groups[g].length, groups[g].map(row).join(''))).join('');
+  }
+  wireRows();
+  updateStat();
+}
+
+function renderCollections(){
+  const m = allCollections();
+  const names = Object.keys(m).sort((a,b) => a.localeCompare(b));
+  let html = `<button type="button" class="lib-coll${activeCollection===''?' on':''}" data-coll="">All papers</button>`;
+  html += names.map(n =>
+    `<button type="button" class="lib-coll${activeCollection===n?' on':''}" data-coll="${esc(n)}">${esc(n)} <span class="lib-coll-n">${m[n]}</span></button>`).join('');
+  collEl.innerHTML = html;
+  collEl.hidden = names.length === 0 && activeCollection === '';
+}
+
+function renderAll(){ renderCollections(); render(); }
+
+function wireRows(){
+  listEl.querySelectorAll('.lib-sel').forEach(sel => {
+    sel.addEventListener('change', () => { lsSet('rr-status-'+sel.dataset.id, sel.value); render(); });
+  });
+  listEl.querySelectorAll('.starrate').forEach(sr => {
+    sr.addEventListener('click', e => {
+      const b = e.target.closest('[data-p]'); if (!b) return;
+      const p = LIBRARY.find(x => x.id === sr.dataset.id);
+      let v = parseInt(b.dataset.p, 10); if (prioOf(p) === v) v = 0;
+      lsSet('rr-prio-'+sr.dataset.id, v); render();
+    });
+  });
+  listEl.querySelectorAll('.rowcheck').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) selected.add(cb.dataset.id); else selected.delete(cb.dataset.id);
+      updateStat();
+    });
+  });
+  // custom-tag editing (chips + an inline "+ tag" input)
+  listEl.querySelectorAll('.lib-tag-x').forEach(b => b.addEventListener('click', () => {
+    removeCustomTag(b.closest('.lib-tags').dataset.id, b.dataset.t); renderAll();
+  }));
+  listEl.querySelectorAll('.lib-tag-add').forEach(inp => inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && inp.value.trim()) { addCustomTag(inp.dataset.id, inp.value.trim()); renderAll(); }
+  }));
+}
+
+function updateStat(){
+  const n = selected.size, total = LIBRARY.length;
+  const shownColl = activeCollection ? ' · collection “' + activeCollection + '”' : '';
+  statEl.textContent = total + ' paper' + (total === 1 ? '' : 's') + (n ? ' · ' + n + ' selected' : '') + shownColl;
+  selCount.textContent = n ? n + ' selected' : 'Select all';
+  const vis = visible();
+  selAll.checked = vis.length > 0 && vis.every(p => selected.has(p.id));
+  tagselEl.disabled = n === 0;
+  tagselEl.placeholder = n === 0 ? 'Tag selected papers…' : 'Tag ' + n + ' selected — press Enter';
+}
+
+function chosen(){
+  // selection if any, otherwise everything currently visible (respects the collection filter)
+  const vis = visible();
+  const picks = vis.filter(p => selected.has(p.id));
+  return picks.length ? picks : vis;
+}
+
+selAll.addEventListener('change', () => {
+  const vis = visible();
+  if (selAll.checked) vis.forEach(p => selected.add(p.id));
+  else vis.forEach(p => selected.delete(p.id));
+  render();
+});
+
+// click a collection chip to filter the list to that custom tag
+collEl.addEventListener('click', e => {
+  const b = e.target.closest('[data-coll]'); if (!b) return;
+  activeCollection = b.dataset.coll;
+  renderAll();
+});
+
+// add a custom tag to every selected paper ("add to collection")
+tagselEl.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const t = tagselEl.value.trim(); if (!t) return;
+  const picks = LIBRARY.filter(p => selected.has(p.id));
+  if (!picks.length) return;
+  picks.forEach(p => addCustomTag(p.id, t));
+  tagselEl.value = '';
+  renderAll();
+});
+
+document.getElementById('copybib').addEventListener('click', (e) => {
+  const text = chosen().map(p => p.bibtex).join('\n\n');
+  if (!text) return;
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => {
+    const b = e.target, label = b.textContent; b.textContent = 'Copied ✓';
+    setTimeout(() => { b.textContent = label; }, 1400);
+  });
+});
+
+document.getElementById('dlbib').addEventListener('click', () => {
+  const picks = chosen();
+  if (!picks.length) return;
+  const text = picks.map(p => p.bibtex).join('\n\n') + '\n';
+  const blob = new Blob([text], {type: 'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  // name the .bib after the active collection when filtering one, else the whole library
+  a.download = (activeCollection ? activeCollection.replace(/[^A-Za-z0-9._-]+/g, '-') : 'reading-room') + '.bib';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+});
+
+qEl.addEventListener('input', render);
+groupEl.addEventListener('change', render);
+renderAll();
+
+// theme toggle — persists to localStorage, light is default
+(function () {
+  var root = document.documentElement;
+  var btn = document.querySelector('.theme-toggle');
+  if (!btn) return;
+  function sync(){ btn.setAttribute('aria-pressed', root.getAttribute('data-theme') === 'dark' ? 'true' : 'false'); }
+  sync();
+  btn.addEventListener('click', function () {
+    var dark = root.getAttribute('data-theme') === 'dark';
+    if (dark) { root.removeAttribute('data-theme'); } else { root.setAttribute('data-theme', 'dark'); }
+    try { localStorage.setItem('rr-theme', dark ? 'light' : 'dark'); } catch (e) {}
+    sync();
+  });
+})();
+</script>
+</body>
+</html>

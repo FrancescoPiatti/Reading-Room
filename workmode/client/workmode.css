@@ -1,0 +1,142 @@
+/* ===========================================================================
+   workmode.css — styles for the local work-mode UI (terminal drawer, launcher,
+   toast). Injected ONLY by the local server; never part of the static docs/.
+
+   Composes exclusively from base.css design tokens (--bg-card, --bg-raised,
+   --line, --ink*, --accent, --accent-dim, --link, --shadow-card, --mono), so it
+   themes light/dark for free via the page's existing data-theme toggle. The only
+   NEW custom property is --rr-wm-h (drawer height) — additive, not a color.
+   =========================================================================== */
+:root { --rr-wm-h: 340px; }
+
+/* ---- floating launcher (bottom-right) ---- */
+.rr-wm-launch {
+  position: fixed; right: 18px; bottom: 18px; z-index: 9998;
+  display: flex; gap: 8px; align-items: center;
+}
+.rr-wm-launch.rr-hidden { display: none; }
+.rr-wm-btn {
+  appearance: none; cursor: pointer; font-family: var(--mono); font-size: 12.5px;
+  color: var(--ink); background: var(--bg-card); border: 1px solid var(--line);
+  border-radius: 999px; padding: 8px 14px; box-shadow: var(--shadow-card);
+  display: inline-flex; align-items: center; gap: 7px;
+  transition: border-color .15s ease, color .15s ease;
+}
+.rr-wm-btn:hover { border-color: var(--accent); }
+.rr-wm-btn:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.rr-wm-btn svg { width: 15px; height: 15px; flex: none; }
+
+/* ---- split button: main action + a ▾ caret that switches which command it runs ---- */
+.rr-wm-split { display: inline-flex; align-items: stretch; }
+.rr-wm-split-main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.rr-wm-split-caret {
+  border-top-left-radius: 0; border-bottom-left-radius: 0;
+  border-left: 1px solid var(--line); margin-left: -1px; padding: 8px 10px;
+}
+.rr-wm-split-caret svg { width: 13px; height: 13px; }
+
+/* the ▾ menu — a small popover floated above the launcher (positioned in JS) */
+.rr-wm-menu {
+  position: fixed; z-index: 10001; min-width: 184px;
+  display: none; flex-direction: column;
+  background: var(--bg-card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow-card); padding: 6px;
+}
+.rr-wm-menu.rr-show { display: flex; }
+.rr-wm-menu-item {
+  appearance: none; cursor: pointer; text-align: left;
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+  background: var(--bg-card); border: 1px solid transparent; border-radius: 7px;
+  padding: 8px 10px; transition: border-color .15s ease;
+}
+.rr-wm-menu-item:hover { border-color: var(--accent); }
+.rr-wm-menu-item:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.rr-wm-menu-item svg { width: 15px; height: 15px; flex: none; }
+
+/* ---- bottom terminal drawer (IDE-style) ---- */
+.rr-wm-drawer {
+  position: fixed; left: 0; right: 0; bottom: 0; height: var(--rr-wm-h);
+  z-index: 10000; display: flex; flex-direction: column;
+  background: var(--bg-card); border-top: 1px solid var(--line);
+  box-shadow: var(--shadow-card);
+  transform: translateY(100%); transition: transform .18s ease;
+}
+.rr-wm-drawer.rr-open { transform: translateY(0); }
+.rr-wm-grip { height: 6px; flex: none; cursor: ns-resize; }
+.rr-wm-grip:hover { background: var(--accent-dim); }
+
+.rr-wm-bar {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  padding: 6px 10px; border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 12px; color: var(--ink-faint);
+}
+.rr-wm-title { color: var(--ink); font-size: 12.5px; display: inline-flex; align-items: center; gap: 7px; }
+.rr-wm-title svg { width: 14px; height: 14px; }
+.rr-wm-hint { color: var(--ink-faint); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-wm-spacer { flex: 1; }
+.rr-wm-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--ink-faint); flex: none; }
+.rr-wm-dot.rr-live { background: var(--accent); }
+
+.rr-wm-iconbtn {
+  appearance: none; cursor: pointer; width: 28px; height: 28px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--ink-soft); background: var(--bg-card);
+  border: 1px solid var(--line); border-radius: 7px;
+  transition: border-color .15s ease, color .15s ease;
+}
+.rr-wm-iconbtn:hover { color: var(--ink); border-color: var(--accent); }
+.rr-wm-iconbtn:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.rr-wm-iconbtn svg { width: 15px; height: 15px; }
+
+.rr-wm-endchat {
+  appearance: none; cursor: pointer; flex: none; font-family: var(--mono); font-size: 12px;
+  color: var(--ink-soft); background: var(--bg-card); border: 1px solid var(--line);
+  border-radius: 999px; padding: 4px 12px; transition: color .15s ease, border-color .15s ease;
+}
+.rr-wm-endchat:hover { color: var(--ink); border-color: var(--accent); }
+.rr-wm-endchat:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.rr-wm-endchat[hidden] { display: none; }
+
+.rr-wm-term { flex: 1; min-height: 0; background: var(--bg-raised); padding: 6px 4px 4px 8px; overflow: hidden; }
+.rr-wm-term .xterm { height: 100%; }
+.rr-wm-term .xterm-viewport { background: transparent !important; }
+
+/* keep the page bottom reachable above an open drawer */
+body.rr-wm-bodyopen { padding-bottom: var(--rr-wm-h); }
+
+/* ---- toast (used on pages without the graph add-on's toast) ---- */
+.rr-wm-toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+  z-index: 10001; display: none; align-items: center; gap: 12px;
+  background: var(--bg-card); border: 1px solid var(--line); border-radius: 999px;
+  box-shadow: var(--shadow-card); padding: 8px 8px 8px 16px;
+  font-family: var(--mono); font-size: 12.5px; color: var(--ink); max-width: 90vw;
+}
+.rr-wm-toast.rr-show { display: flex; }
+.rr-wm-toast .rr-wm-toast-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-wm-toast .rr-wm-toast-act {
+  appearance: none; cursor: pointer; font-family: var(--mono); font-size: 12px;
+  color: var(--bg); background: var(--accent); border: 1px solid var(--accent);
+  border-radius: 999px; padding: 5px 13px; flex: none;
+}
+.rr-wm-toast .rr-wm-toast-act:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+
+@media (max-width: 560px) {
+  .rr-wm-hint { display: none; }
+}
+
+/* ---- in-app PDF viewer overlay ---- */
+.rr-pdf-overlay {
+  position: fixed; inset: 0; z-index: 10002; display: none; flex-direction: column;
+  background: var(--bg);
+}
+.rr-pdf-overlay.rr-show { display: flex; }
+.rr-pdf-bar {
+  display: flex; align-items: center; gap: 10px; flex: none;
+  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  background: var(--bg-card); font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+}
+.rr-pdf-title { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-pdf-frame { flex: 1; min-height: 0; width: 100%; border: 0; background: var(--bg); }
+body.rr-pdf-open { overflow: hidden; }

@@ -1,0 +1,29 @@
+{
+  "field": "medicine",
+  "label": "Medicine & health",
+  "tags": [
+    "clinical-trials",
+    "epidemiology",
+    "diagnostics",
+    "therapeutics",
+    "public-health",
+    "imaging",
+    "genomics",
+    "statistics",
+    "methods",
+    "reproducibility"
+  ],
+  "max_tags": 4,
+  "sections": [
+    {"key": "summary", "title": "Summary"},
+    {"key": "math", "title": "Methods & statistics"},
+    {"key": "architecture", "title": "Study design"},
+    {"key": "results", "title": "Results"},
+    {"key": "significance", "title": "Significance & limitations"},
+    {"key": "reproducibility", "title": "Data & reproducibility"}
+  ],
+  "required_sections": ["summary", "significance"],
+  "lens": "the study design, methods, and statistical validity (effect sizes, confidence intervals) — over-invest here",
+  "lens_key": "math",
+  "tone": "assume a clinician/researcher; report effect sizes and CIs; state limitations and bias; define methods"
+}
