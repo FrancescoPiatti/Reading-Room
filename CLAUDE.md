@@ -28,6 +28,9 @@ A personal catalogue of focused paper breakdowns. Reports are generated **intera
 .claude/commands/refresh-venues.md  update preprints that have since been published
 .claude/commands/setup.md           profile setup + minimal command adaptation (replaces profile.md)
 .claude/commands/backup.md          export/import all user data as a zip (wraps archive.py)
+.claude/skills/verify-build/        build-QA skill (wraps verify.py --build)
+.claude/skills/run-reading-room/    agent driver for the app: serve/smoke/term/shot/build/stop, no window
+                                    (use it to launch, health-check, or screenshot instead of the launchers)
 templates/   base.css + report/index/graph/compare/chat/library templates ({{PLACEHOLDER}} replacement)
 templates/account.html              avatar menu + Profile/Setup/Back-up/Tutorial modals, injected on every page by build.py
 templates/vendor/                   self-hosted fuse.min.js + d3.min.js + fonts.css + fonts/*.woff2 (copied to docs/assets/)

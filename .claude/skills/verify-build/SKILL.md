@@ -5,7 +5,7 @@ description: Run build QA on the Reading Room (reports, generated docs/, BibTeX,
 
 # Verify the Reading Room build
 
-Run the project's QA checker and act on what it finds. This catches the failure modes that are easy to miss by eye: unresolved `{{PLACEHOLDERS}}`, broken embedded JSON, unbalanced `<script>` tags, missing `cite.bib`, stray `.txt` scratch in `papers/`, missing required sections, and WCAG AA contrast regressions in either theme.
+Run the project's QA checker and act on what it finds. This catches the failure modes that are easy to miss by eye: unresolved `{{PLACEHOLDERS}}`, broken embedded JSON, unbalanced `<script>` tags, missing `cite.bib`, stray `.txt` scratch in `papers/`, missing required sections, and WCAG AA contrast regressions in either theme — plus the authored-content checks: unbalanced HTML tags and unpaired `\( \)` / `\[ \]` LaTeX delimiters in any digest/compare/chat html, un-normalized `cites[].id`, malformed `published` metadata, tags outside the active vocabulary, and invalid field packs.
 
 ## How to run
 From the repo root:
