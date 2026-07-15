@@ -17,16 +17,17 @@ Nothing runs headlessly or via a paid API — generation happens interactively i
 <!-- VIDEO PLACEHOLDER: work mode — discuss a paper (/learn) + End chat, and /deep-dive -->
 
 ## Setup
-1. Have an AI coding assistant installed and logged in — [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), Codex, or Gemini (using your existing subscription).
-2. **Clone or fork** this repository (`git clone <repo-url>`), or download it as a zip. That's it — `build.py` needs only Python 3.8+, no other dependencies.
-3. Start your AI assistant in the folder and run `/setup` once — a short questionnaire that writes your profile + field config under `user/`.
+1. **An AI coding assistant — required.** [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), Codex, or Gemini, installed and logged in (its CLI must run from a terminal). Reports are authored in your AI session, covered by your existing subscription — no API key, no separate account.
+2. **Python 3.8+** and **[Node.js](https://nodejs.org/) 18+** — both free. You never run them yourself; the app uses them under the hood and tells you if one is missing.
+3. **Clone or fork** this repository (`git clone <repo-url>`), or download it as a zip.
+4. **Double-click `ReadingRoom.app`** (macOS) or **`ReadingRoom.bat`** (Windows). The app opens with a short tutorial, hands off to **Setup** (your field, focus views, defaults), and offers to put a **Reading Room shortcut on your Desktop** (or a folder you pick). Its integrated terminal is where your AI runs.
 
-One example paper (*Attention Is All You Need*) ships in the catalogue so the first launch isn't empty and you can see what a finished report looks like — keep it, or `/remove 1706.03762` once you've added your own.
+Two example papers ship in the catalogue (*Attention Is All You Need* and Hornik's universal-approximation theorem) so the first launch isn't empty and you can see finished reports — keep them, or `/remove <id>` once you've added your own.
 
 **Updating later:** your data never mixes with the app's code — digests live in `reports/`, your settings in `user/` (gitignored) — so `git pull` (or re-downloading) updates the tool without touching your library. `/backup export` zips all of it anytime.
 
 ## Use it
-From the repo root, start your AI assistant (`claude`, `codex`, or `gemini`) and run:
+In the app, click **Explain a paper** (the command picker pre-types it into the terminal), or start your AI in the Terminal drawer and type:
 
 ```
 /explain-paper 2402.01234              # arXiv id
@@ -34,12 +35,7 @@ From the repo root, start your AI assistant (`claude`, `codex`, or `gemini`) and
 /explain-paper ~/Downloads/paper.pdf   # local file
 ```
 
-It downloads/reads the PDF, shows you a short outline + proposed tags and focus views, and **waits for your approval**. After you say go, it writes `reports/<id>/digest.json`, runs the build, and you open the result.
-
-```
-python build.py        # regenerate the whole site from reports/
-open docs/index.html   # browse, search, filter by tag (works offline)
-```
+It downloads/reads the PDF, shows you a short outline + proposed tags and focus views, and **waits for your approval**. After you say go, it writes the report, the site rebuilds itself, and the new card appears in the catalogue.
 
 **Adding a paper that isn't on arXiv:** `/explain-paper` accepts an arXiv id/URL, a **direct PDF URL**, or a **local PDF path** (e.g. `/explain-paper ~/Downloads/paper.pdf`) — so anything you have a PDF for can go in the catalogue.
 
@@ -58,33 +54,23 @@ open docs/index.html   # browse, search, filter by tag (works offline)
 ## Host it (optional)
 Push the repo to GitHub, then Settings → Pages → deploy from branch, folder `/docs`. The catalogue is live at your Pages URL. Downloaded PDFs are gitignored; `docs/` is deliberately **committed** — it's what Pages serves.
 
-## Work mode — run it like an app (optional, local)
-Reading Room has two ways to run, and they don't interfere:
+## The app (work mode)
+The app is the **default way to use Reading Room**: one window with the catalogue, an **integrated AI terminal** (Claude, Codex, or Gemini) in a bottom drawer, and **live rebuilds** — analyze a paper in the terminal and the catalogue/graph refresh themselves. It's a small local server (`workmode/`) bound to loopback only, never exposed to the network. The static site underneath (`docs/`, openable directly or hosted on GitHub Pages) keeps working without it — see "Browse" below.
 
-- **Browse mode (static).** `docs/` opened directly or served by GitHub Pages — the zero-dependency path described above. Unchanged.
-- **Work mode (local app).** A small local server (`workmode/`) serves the *same* UI on `http://127.0.0.1:4317` and adds an **integrated AI terminal** (Claude, Codex, or Gemini) in a bottom drawer plus **live rebuilds**: analyze a paper in the terminal and the catalogue/graph refresh themselves. It binds to loopback only and is never exposed to the network.
-
-**Launch it:** double-click **`ReadingRoom.app`** (macOS) or **`ReadingRoom.bat`** (Windows). First run installs deps and **offers to put a "Reading Room" shortcut on your Desktop** (or a folder you pick — you can skip it); each launch then starts the server **in the background** and opens a chromeless app window. With `ReadingRoom.app` **no Terminal window appears at all** (errors, if any, show as a dialog). For a visible server with live logs, `cd workmode && npm start` runs it in the foreground. Or manually:
+**Launch it:** double-click **`ReadingRoom.app`** (macOS) or **`ReadingRoom.bat`** (Windows). First run installs deps and **offers to put a "Reading Room" shortcut on your Desktop** (or a folder you pick — you can skip it; to get the offer again later, delete `user/.desktop-shortcut-offered` and relaunch); each launch then starts the server **in the background** and opens a chromeless app window. With `ReadingRoom.app` **no Terminal window appears at all** (errors, if any, show as a dialog). *(Prefer a terminal? `cd workmode && npm start` runs the same server in the foreground with visible logs.)*
 
 > **macOS first-launch notes.** The app is unsigned, so Gatekeeper may block the first open — right-click the app → **Open** (or run `xattr -d com.apple.quarantine ReadingRoom.app`). **Where the folder lives matters:**
 > - Best: a plain local folder like `~/ReadingRoom` or `~/GitHub/reading-room`.
 > - Desktop / Documents / Downloads / OneDrive / iCloud are **privacy-protected (TCC)**: macOS gates each app's file access there. If double-click does nothing or you see a *"macOS is blocking…"* dialog, grant access once in **System Settings → Privacy & Security** (Files & Folders, or Full Disk Access → **+** → add `ReadingRoom.app`) and open it again. Updating the app can reset this — same 10-second fix.
 > - Cloud-synced folders (OneDrive/iCloud/Dropbox) also **evict file contents to the cloud** ("free up space"); the server then hangs or dies at startup on the placeholder files. If you must keep it there, right-click the folder → **Always Keep on This Device** — but a plain local folder avoids all of this.
 
-```
-cd workmode && npm install   # first time only
-npm start                    # serves 127.0.0.1:4317 and opens the app window
-```
-
-In work mode, hollow **ghost nodes** on the Connections graph become actionable — **Analyze** (runs `/explain-paper` in the drawer), **Dismiss** (persists to `dismissed.json`), or **Keep**. The launcher is a row of **split buttons** — a main action plus a ▾ that switches what it does (and remembers your choice): a **command picker** (`/explain-paper` · `/compare` · `/learn` (discuss) · `/deep-dive`, pre-typed for you to fill in and run) and a **Terminal** button whose main click toggles the drawer and whose ▾ launches an AI (`claude`, `codex`, or `gemini`) inside it. Opening a paper auto-opens the terminal; a running discussion shows an **End chat** button, and a discussion page a **Remove discussion** button. You still run the agent and approve each step yourself — work mode never bypasses the AI's permission prompts.
+In the app, hollow **ghost nodes** on the Connections graph become actionable — **Analyze** (runs `/explain-paper` in the drawer), **Dismiss** (persists to `dismissed.json`), or **Keep**. The launcher is a row of **split buttons** — a main action plus a ▾ that switches what it does (and remembers your choice): a **command picker** (`/explain-paper` · `/compare` · `/learn` (discuss) · `/deep-dive`, pre-typed for you to fill in and run) and a **Terminal** button whose main click toggles the drawer and whose ▾ launches an AI (`claude`, `codex`, or `gemini`) inside it. Opening a paper auto-opens the terminal; report pages get an **Edit notes** button (your own notes, rendered under "My notes" on the report); a running discussion shows an **End chat** button, and a discussion page a **Remove discussion** button. You still run the agent and approve each step yourself — the app never bypasses the AI's permission prompts.
 
 The app window is chromeless, so external links (e.g. arXiv) open in your normal browser instead of stranding the window. The server runs **headless in the background** (no Terminal window). **Closing the app window stops it** a few seconds later (so a refresh doesn't kill it); its output goes to `workmode/workmode.log`, and you can force-stop it with `kill $(cat workmode/workmode.pid)` (macOS) or via Activity Monitor / Task Manager. Set `RR_KEEPALIVE=1` to keep it running after the window closes, or `RR_PORT=5000` to change the port. The reading queue and ghost nodes offer **Analyze / Dismiss / Keep**, and report pages get a **View PDF** button — *View PDF* opens the analyzed paper **inside the app** (the local `papers/<id>.pdf`, or proxied from arXiv through the local server) with a **Back** button, so you never leave the window. Ghost papers aren't downloaded, so they have no *View PDF*.
 
-*(Want a visible server with live logs instead? Run `cd workmode && npm start` — that keeps it in the foreground in your own terminal.)*
+**Works on macOS and Windows.** `ReadingRoom.app` (macOS) and `ReadingRoom.bat` (Windows) are equivalent; the server, UI, live rebuild, and ghost/queue actions are all cross-platform. On macOS the launcher carries a custom icon — if cloud sync ever strips it, `bash assets/build-icon.sh` reinstalls it.
 
-**Works on macOS and Windows.** `ReadingRoom.app` (macOS) and `ReadingRoom.bat` (Windows) are equivalent; the server, UI, live rebuild, and ghost/queue actions are all cross-platform. On macOS the launcher carries a custom icon — regenerate/reinstall it with `bash assets/build-icon.sh` (and `python3 assets/make_logo.py` to redraw the logo) if cloud sync ever strips it; that script installs the icon into `ReadingRoom.app`.
-
-**Prerequisites for work mode only:** [Node.js](https://nodejs.org/) 18+ and an AI coding assistant ([Claude Code](https://docs.claude.com/en/docs/claude-code/overview), Codex, or Gemini) on your PATH. (The static build still needs nothing but Python.) The integrated terminal uses `node-pty`, which installs a prebuilt binary when one exists for your Node version, otherwise compiles it — that needs a C/C++ toolchain (macOS: `xcode-select --install`; Windows: "Desktop development with C++" Build Tools). If it can't build, everything except the terminal still works.
+**A note on the terminal component:** the integrated terminal uses `node-pty`, which installs a prebuilt binary when one exists for your Node version, otherwise compiles it — that needs a C/C++ toolchain (macOS: `xcode-select --install`; Windows: "Desktop development with C++" Build Tools). If it can't build, everything except the terminal still works.
 
 ## Make it yours
 - **Profile & setup**: the **avatar** in the header opens **Profile** and **Setup** — a short questionnaire for your name, field(s), default focus views (**add your own**), tag vocabulary, and depth/audience. In work mode, finishing auto-runs `/setup`, which writes `user/profile.json` + `user/config.json`; the commands read those at runtime, so reports adapt **without editing any command files**. Config lives under `user/` (gitignored), so app updates never overwrite it.

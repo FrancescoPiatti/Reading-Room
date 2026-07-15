@@ -309,6 +309,35 @@ app.post('/api/remove-chat', (req, res) => {
   runBuild((code) => res.json({ ok: code === 0 }));
 });
 
+// Read + write a paper's own notes (reports/<id>/notes.md) from the app.
+// id is shape-validated (no separators, no '..') so this can never escape
+// reports/, and it must name a folder that actually holds a digest.json.
+function notesPathFor(rawId) {
+  const id = String(rawId || '').trim();
+  if (!id || !/^[A-Za-z0-9._-]+$/.test(id) || id.indexOf('..') !== -1) return null;
+  if (!fs.existsSync(path.join(REPORTS, id, 'digest.json'))) return null;
+  return path.join(REPORTS, id, 'notes.md');
+}
+app.get('/api/notes', (req, res) => {
+  const p = notesPathFor(req.query.id);
+  if (!p) return res.status(400).json({ ok: false, error: 'unknown paper id' });
+  let text = '';
+  try { text = fs.readFileSync(p, 'utf8'); } catch (e) {} // no notes yet -> empty editor
+  res.json({ ok: true, text });
+});
+app.post('/api/notes', (req, res) => {
+  const p = notesPathFor(req.body && req.body.id);
+  if (!p) return res.status(400).json({ ok: false, error: 'unknown paper id' });
+  const text = String((req.body && req.body.text) || '');
+  try {
+    if (text.trim() === '') { if (fs.existsSync(p)) fs.unlinkSync(p); } // empty save removes the block
+    else fs.writeFileSync(p, text);
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+  runBuild((code) => res.json({ ok: code === 0 }));
+});
+
 // Persist the Setup questionnaire's answers so the /setup skill can read them and,
 // with your approval, write user/profile.json + user/config.json. Written to
 // user/.setup-intake.json (or repo-root .setup-intake.json on an un-migrated repo);
@@ -442,15 +471,25 @@ function broadcastTerm(obj) {
   for (const ws of termSubs) { if (ws.readyState === 1) { try { ws.send(s); } catch (e) {} } }
 }
 function killTerm() { if (sharedTerm) { try { sharedTerm.kill(); } catch (e) {} sharedTerm = null; } }
+// Epoch counter: a respawn kills the old shell and immediately starts a new one.
+// The old shell's onData/onExit fire asynchronously AFTER the new spawn — without
+// the epoch guard they'd broadcast a spurious 'exit' (which makes clients drop
+// their queued input) or splice stale output into the new session's buffer.
+let termEpoch = 0;
 function spawnSharedTerm(cols, rows) {
+  const myEpoch = ++termEpoch;
   const shell = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : 'bash');
   sharedTerm = pty.spawn(shell, [], { name: 'xterm-256color', cols, rows, cwd: REPO, env: process.env });
   sharedTerm.onData((d) => {
+    if (myEpoch !== termEpoch) return;
     termBuffer += d;
     if (termBuffer.length > TERM_BUFFER_CAP) termBuffer = termBuffer.slice(-TERM_BUFFER_CAP);
     broadcastTerm({ type: 'data', data: d });
   });
-  sharedTerm.onExit(() => { broadcastTerm({ type: 'exit' }); sharedTerm = null; termBuffer = ''; });
+  sharedTerm.onExit(() => {
+    if (myEpoch !== termEpoch) return;
+    broadcastTerm({ type: 'exit' }); sharedTerm = null; termBuffer = '';
+  });
 }
 
 // Quit when the last app window goes away (after a grace period so a page reload
@@ -494,6 +533,17 @@ wss.on('connection', (ws) => {
         try { sharedTerm.resize(cols, rows); } catch (e) {}
       }
       try { ws.send(JSON.stringify({ type: 'ready' })); } catch (e) {} // ack -> client flushes pre-typed input
+    } else if (m.type === 'respawn') {
+      // Launching a different AI: kill the shared shell — whatever TUI is inside it —
+      // and start fresh, so `codex` is never typed INTO a running `claude`.
+      if (!pty) { try { ws.send(JSON.stringify({ type: 'fatal', msg: 'node-pty is not installed; run `npm install` in workmode/ to enable the terminal.' })); } catch (e) {} return; }
+      termSubs.add(ws);
+      const cols = Math.min(1000, Math.max(1, (m.cols | 0) || 80));
+      const rows = Math.min(1000, Math.max(1, (m.rows | 0) || 24));
+      killTerm();
+      termBuffer = '';
+      spawnSharedTerm(cols, rows);
+      try { ws.send(JSON.stringify({ type: 'ready' })); } catch (e) {}
     } else if (m.type === 'data' && sharedTerm) {
       sharedTerm.write(m.data);
     } else if (m.type === 'resize' && sharedTerm) {

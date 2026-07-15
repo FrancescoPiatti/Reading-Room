@@ -1257,7 +1257,7 @@ body.rr-modal-open { overflow: hidden; }
     // closing the tutorial (any way — Finish, Skip, ×, backdrop, Esc) marks it seen and,
     // on first run, hands off straight to Setup.
     if (m === tutorialModal) {
-      try { localStorage.setItem('rr-tutorial-seen', '1'); } catch (e) {}
+      try { localStorage.setItem(TUT_SEEN_KEY, '1'); } catch (e) {}
       if (tutToSetup) { tutToSetup = false; autoOpenTimer = setTimeout(openSetup, 250); }
     }
   }
@@ -1694,8 +1694,14 @@ body.rr-modal-open { overflow: hidden; }
   /* ----------------------------------------------------- first-run onboarding */
   // First visit (tutorial not seen yet)? Open the tutorial, which on close hands off to
   // Setup. One-shot, remembered in localStorage (set when the tutorial closes).
+  // The seen-flag is scoped to THIS COPY's site root: file:// pages share a single
+  // localStorage origin, so a plain key set by one copy would suppress the first-run
+  // tutorial in every OTHER downloaded copy opened on the same machine — but a fresh
+  // clone/ZIP must show it. The root path ('../../' resolved against the page)
+  // is the same on every page of one copy and different for each copy/host.
+  var TUT_SEEN_KEY = 'rr-tutorial-seen@' + new URL('../../' || './', location.href).pathname;
   (function (){
-    var seen = false; try { seen = localStorage.getItem('rr-tutorial-seen') === '1'; } catch (e) {}
+    var seen = false; try { seen = localStorage.getItem(TUT_SEEN_KEY) === '1'; } catch (e) {}
     if (!seen) autoOpenTimer = setTimeout(function (){ openTutorial(true); }, 500);
   })();
 })();

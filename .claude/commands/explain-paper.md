@@ -37,6 +37,7 @@ While reading, build the paper's `cites` list (see schema) so the catalogue's co
 Before drafting, **skim the whole paper** (abstract, section headings, figures, results, conclusion) to see how it is actually organised. Then design *this paper's* focus views by **starting from the reader's default `config.sections`** (what they chose at setup) and adapting to fit the paper:
 - always keep `summary` + `significance`;
 - keep the default views the paper genuinely supports; **drop** ones it doesn't (never emit an empty section);
+- **`reproducibility` is opt-in, not a default**: write it only when the reader asked for it — `--views` includes it, `--focus` points at it, or their setup put it in `defaults.views` / config `sections` as a chosen default. Otherwise skip it even for papers with code;
 - **add** a paper-specific custom view (a fresh `sections` key + a descriptive title — the build renders any key) when the paper has a major thread the defaults don't capture;
 - weight depth toward the field's lens (`config.lens_key`) and calibrate to the reader's `expertise` / `audience`.
 
@@ -84,7 +85,7 @@ Match this schema exactly. Omit any `sections` entry you're skipping — do not 
 }
 ```
 
-`summary` and `significance` are **always written** (the build warns if either is missing). The rest are written when relevant (respecting any `--views`).
+`summary` and `significance` are **always written** (the build warns if either is missing). The rest are written when relevant (respecting any `--views`) — except `reproducibility`, which is written **only when explicitly requested** (`--views`/`--focus`/the reader's configured defaults).
 
 **Tags — use ONLY the active controlled vocabulary** (keep them broad; pick the 2–4 that fit, never invent paper-specific tags — `verify.py` fails the build on any tag outside the set, and the catalogue/library stay usable only if tags stay general). The live list is **`config.tags`** from the field config (`user/config.json`, else `config.example.json`, else the shipped `templates/fields/*.json` packs) — **read it at runtime and use exactly those**. Don't rely on any vocabulary copied into this file (it would drift from the config and the build would reject it). For reference only, the ML pack's default vocabulary lives in `templates/fields/ml.json`.
 If a paper genuinely needs a category the active vocabulary doesn't cover, propose adding it to `config.tags` (the user's field config) at Gate 1 — added deliberately, once — rather than inventing a one-off tag.
@@ -106,7 +107,7 @@ If a paper genuinely needs a category the active vocabulary doesn't cover, propo
 - **architecture** — the structure: model/algorithm components and data flow (ML), the experimental design (bio), or the empirical strategy (econ).
 - **results** — headline numbers as a `<table>`, the setup, and what the results actually support vs. overclaim.
 - **significance** *(always)* — one section that puts together **(a)** what's genuinely new + the closest prior work + an honest critique (assumptions, limitations, where it might fail), and **(b)** why it matters for the field (impact, what it unlocks, the lineage it sits in). Use `<h3>` subheadings to separate novelty/critique from the field significance.
-- **reproducibility** — code availability, compute, datasets, and the gotchas you'd hit reimplementing it.
+- **reproducibility** *(opt-in — only on request or when configured as a default view)* — code availability, compute, datasets, and the gotchas you'd hit reimplementing it.
 
 ### HTML authoring rules (the template styles these)
 - Use only: `<p> <h2> <h3> <ul> <ol> <li> <strong> <code> <pre> <a> <table> <thead> <tbody> <tr> <th> <td>`.

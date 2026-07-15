@@ -140,3 +140,17 @@ body.rr-wm-bodyopen { padding-bottom: var(--rr-wm-h); }
 .rr-pdf-title { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rr-pdf-frame { flex: 1; min-height: 0; width: 100%; border: 0; background: var(--bg); }
 body.rr-pdf-open { overflow: hidden; }
+
+/* ---- in-app notes editor overlay (shares the pdf bar/title styles) ---- */
+.rr-notes-overlay {
+  position: fixed; inset: 0; z-index: 10002; display: none; flex-direction: column;
+  background: var(--bg);
+}
+.rr-notes-overlay.rr-show { display: flex; }
+.rr-notes-hint { color: var(--ink-faint); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-notes-ta {
+  flex: 1; min-height: 0; width: 100%; border: 0; resize: none; outline: none;
+  padding: 22px clamp(18px, 8vw, 120px); background: var(--bg); color: var(--ink);
+  font-family: var(--mono); font-size: 13.5px; line-height: 1.65;
+}
+.rr-notes-save:disabled { opacity: .5; cursor: default; }

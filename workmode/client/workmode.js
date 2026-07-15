@@ -52,6 +52,7 @@
   var ICO_CMP  = svg('<rect x="3" y="4" width="7" height="16" rx="1"/><rect x="14" y="4" width="7" height="16" rx="1"/>');
   var ICO_LEARN= svg('<path d="M22 10L12 5 2 10l10 5 10-5z"/><path d="M6 12v5c0 2 3 3 6 3s6-1 6-3v-5"/>');
   var ICO_BOT  = svg('<rect x="4" y="8" width="16" height="11" rx="2"/><path d="M12 8V4"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="13" r="1"/>');
+  var ICO_PEN  = svg('<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/>');
 
   /* --------------------------------------------------------------- helpers */
   function el(tag, cls, html){ var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
@@ -139,10 +140,14 @@
 
   /* ----------------------------------------------------------- build the UI */
   var launch = el('div', 'rr-wm-launch');
-  if (REPORT_ID) {                                 // reading a report -> offer its PDF in-app
+  if (REPORT_ID) {                                 // reading a report -> offer its PDF + notes in-app
     var pdfBtn = el('button', 'rr-wm-btn', ICO_PDF + '<span>View PDF</span>'); pdfBtn.type = 'button';
     pdfBtn.addEventListener('click', function (){ viewPdf(REPORT_ID); });
     launch.appendChild(pdfBtn);
+    var notesBtn = el('button', 'rr-wm-btn', ICO_PEN + '<span>Edit notes</span>'); notesBtn.type = 'button';
+    notesBtn.title = 'Your own notes for this paper (reports/<id>/notes.md) — rendered under "My notes"';
+    notesBtn.addEventListener('click', function (){ editNotes(REPORT_ID); });
+    launch.appendChild(notesBtn);
   }
   if (CHAT_ID) {                                   // reading a discussion -> offer to remove it (no terminal needed)
     var rmBtn = el('button', 'rr-wm-btn', ICO_CLR + '<span>Remove discussion</span>'); rmBtn.type = 'button';
@@ -204,6 +209,7 @@
   /* --------------------------------------------------------- xterm + socket */
   var term = null, fit = null, ws = null, spawned = false, wantSpawn = false;
   var awaitingReady = false, everSpawned = false, reattached = false;
+  var wantRespawn = false;                       // a launch needs a FRESH shell (see launchAgent)
   var pending = [];                              // input queued before the shell is ready (latest request wins)
   var CLR = '\x15';                              // Ctrl+U: clear the input line before (re)typing, so an
                                                  // un-run pre-typed command never accumulates with the next
@@ -253,6 +259,13 @@
       }
       else if (m.type === 'ready') {             // server (re)attached the pty — now safe to flush input
         spawned = true; awaitingReady = false;
+        if (wantRespawn) {
+          // this 'ready' may be a REATTACH to a shell with an agent mid-session —
+          // a queued launch must only flush into a shell created after the respawn
+          wantRespawn = false; spawned = false; awaitingReady = true; reattached = false;
+          send({ type: 'respawn', cols: term ? term.cols : 80, rows: term ? term.rows : 24 });
+          return;
+        }
         if (everSpawned && !reattached && term) term.write('\r\n\x1b[2m— new shell —\x1b[0m\r\n');
         everSpawned = true; reattached = false;
         while (pending.length) send({ type: 'data', data: pending.shift() });
@@ -329,7 +342,7 @@
     setHint('ending chat — the agent will compact it');
     if (term) term.focus();
   });
-  document.addEventListener('keydown', function (e){ if (e.key === 'Escape' && isOpen() && document.activeElement !== term && !(pdfOv && pdfOv.classList.contains('rr-show'))) closeDrawer(); });
+  document.addEventListener('keydown', function (e){ if (e.key === 'Escape' && isOpen() && document.activeElement !== term && !(pdfOv && pdfOv.classList.contains('rr-show')) && !(notesOv && notesOv.classList.contains('rr-show'))) closeDrawer(); });
 
   // pre-type a command (no Enter): user reviews + runs it, prompts preserved.
   // Clears the line first so switching commands (or to a launch) never accumulates
@@ -344,15 +357,22 @@
     if (term) term.focus();
   }
   // launch an agent REPL in the shell. Unlike preType, this DOES press Enter —
-  // starting `claude`/`codex` is what "launch" means. It also clears the line first,
-  // so a leftover pre-typed command (e.g. an un-run `/compare`) is discarded rather
-  // than turned into `/compare claude`.
+  // starting `claude`/`codex` is what "launch" means. It ALWAYS starts from a fresh
+  // shell: the pty is shared and persists across pages, so another agent may be
+  // mid-session inside it — typing `codex` then would go INTO claude's prompt
+  // instead of the shell. The server kills the old pty and spawns a new one; the
+  // launch command flushes only when the fresh shell's 'ready' arrives.
   function launchAgent(name){
     openDrawer();
     endChatBtn.hidden = true;                          // a freshly launched agent has no /learn chat yet
     setHint('launching ' + name + ' …');
-    if (spawned && ws && ws.readyState === 1) { send({ type: 'data', data: CLR + name + '\r' }); }
-    else { pending = [name + '\r']; }   // latest action wins; no leftover pre-typed command
+    pending = [name + '\r'];            // latest action wins; no leftover pre-typed command
+    if (ws && ws.readyState === 1 && !awaitingReady) {
+      spawned = false; awaitingReady = true;
+      send({ type: 'respawn', cols: term ? term.cols : 80, rows: term ? term.rows : 24 });
+    } else {
+      wantRespawn = true;               // converts the in-flight/upcoming spawn into a respawn
+    }
     if (term) term.focus();
   }
 
@@ -459,6 +479,63 @@
   window.RR_viewPdf = viewPdf;
   document.addEventListener('keydown', function (e){
     if (e.key === 'Escape' && pdfOv && pdfOv.classList.contains('rr-show')) closePdf();
+  });
+
+  /* ---------------------------------------------- in-app notes editor overlay */
+  // Edit reports/<id>/notes.md right here: plain text + light Markdown, rendered
+  // into the report's "My notes" block by the build. Saving writes the file via
+  // the loopback API, rebuilds, and reloads this page to show the result.
+  var notesOv = null;
+  function buildNotesOverlay(){
+    if (notesOv) return notesOv;
+    notesOv = el('div', 'rr-notes-overlay');
+    var bar = el('div', 'rr-pdf-bar');
+    var back = el('button', 'rr-wm-btn', ICO_BACK + '<span>Back</span>'); back.type = 'button';
+    var title = el('span', 'rr-pdf-title', '');
+    var hint = el('span', 'rr-notes-hint', 'plain text + light Markdown: paragraphs, - bullets, **bold**, `code`');
+    var spacer = el('span', 'rr-wm-spacer');
+    var save = el('button', 'rr-wm-btn rr-notes-save', ICO_PEN + '<span>Save</span>'); save.type = 'button';
+    var ta = el('textarea', 'rr-notes-ta'); ta.setAttribute('aria-label', 'Notes for this paper'); ta.spellcheck = false;
+    bar.appendChild(back); bar.appendChild(title); bar.appendChild(hint); bar.appendChild(spacer); bar.appendChild(save);
+    notesOv.appendChild(bar); notesOv.appendChild(ta);
+    document.body.appendChild(notesOv);
+    back.addEventListener('click', closeNotes);
+    save.addEventListener('click', function (){
+      save.disabled = true;
+      fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: notesOv._id, text: ta.value }),
+      }).then(function (r){ return r.json(); })
+        .then(function (j){
+          if (!j.ok) throw new Error(j.error || 'save failed');
+          location.reload();                       // show the rendered notes (the shell reattaches)
+        })
+        .catch(function (e){ save.disabled = false; toast('Could not save notes' + (e.message ? ': ' + e.message : '')); });
+    });
+    notesOv._title = title; notesOv._ta = ta; notesOv._save = save;
+    return notesOv;
+  }
+  function editNotes(id){
+    if (!id) return;
+    var ov = buildNotesOverlay();
+    ov._id = id;
+    ov._title.textContent = 'My notes — ' + id;
+    ov._ta.value = ''; ov._save.disabled = true;
+    fetch('/api/notes?id=' + encodeURIComponent(id))
+      .then(function (r){ return r.json(); })
+      .then(function (j){ ov._ta.value = (j && j.text) || ''; ov._save.disabled = false; ov._ta.focus(); })
+      .catch(function (){ ov._save.disabled = false; ov._ta.focus(); });
+    ov.classList.add('rr-show');
+    document.body.classList.add('rr-pdf-open');    // same scroll lock as the PDF overlay
+  }
+  function closeNotes(){
+    if (!notesOv) return;
+    notesOv.classList.remove('rr-show');
+    document.body.classList.remove('rr-pdf-open');
+  }
+  document.addEventListener('keydown', function (e){
+    if (e.key === 'Escape' && notesOv && notesOv.classList.contains('rr-show')) closeNotes();
   });
 
   /* -------- keep external links out of the chromeless app window -------- */
