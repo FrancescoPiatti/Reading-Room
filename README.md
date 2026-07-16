@@ -19,7 +19,11 @@ Nothing runs headlessly or via a paid API — generation happens interactively i
 ## Setup
 1. **An AI coding assistant — required.** [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), Codex, or Gemini, installed and logged in (its CLI must run from a terminal). Reports are authored in your AI session, covered by your existing subscription — no API key, no separate account.
 2. **Python 3.8+** and **[Node.js](https://nodejs.org/) 18+** — both free. You never run them yourself; the app uses them under the hood and tells you if one is missing.
-3. **Clone or fork** this repository (`git clone <repo-url>`), or download it as a zip.
+3. **Clone this repository** — paste one line and you're done. It lands in your home folder (a safe spot: not Desktop, not OneDrive — see the first-launch notes) and the folder opens by itself:
+   - **macOS** (Terminal): `cd ~ && git clone https://github.com/FrancescoPiatti/Reading-Room.git ReadingRoom && open ReadingRoom`
+   - **Windows** (PowerShell): `cd ~; git clone https://github.com/FrancescoPiatti/Reading-Room.git ReadingRoom; explorer ReadingRoom`
+
+   (Forking first, or downloading the ZIP and unzipping to `~/ReadingRoom`, works too.)
 4. **Double-click `ReadingRoom.app`** (macOS) or **`ReadingRoom.bat`** (Windows). The app opens with a short tutorial, hands off to **Setup** (your field, focus views, defaults), and offers to put a **Reading Room shortcut on your Desktop** (or a folder you pick). Its integrated terminal is where your AI runs.
 
 Two example papers ship in the catalogue (*Attention Is All You Need* and Hornik's universal-approximation theorem) so the first launch isn't empty and you can see finished reports — keep them, or `/remove <id>` once you've added your own.
