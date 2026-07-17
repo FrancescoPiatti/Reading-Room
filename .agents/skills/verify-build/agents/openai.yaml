@@ -1,0 +1,8 @@
+interface:
+  display_name: "Verify Build"
+  short_description: "Build and run full Reading Room QA"
+  default_prompt: "Use $verify-build to rebuild and run full QA."
+
+policy:
+  allow_implicit_invocation: true
+

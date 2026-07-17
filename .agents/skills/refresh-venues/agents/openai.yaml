@@ -1,0 +1,8 @@
+interface:
+  display_name: "Refresh Venues"
+  short_description: "Update preprint venues from DBLP"
+  default_prompt: "Use $refresh-venues to update published venue metadata."
+
+policy:
+  allow_implicit_invocation: false
+

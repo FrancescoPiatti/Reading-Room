@@ -1,0 +1,8 @@
+interface:
+  display_name: "Remove Paper"
+  short_description: "Safely remove a paper and rebuild"
+  default_prompt: "Use $remove to safely delete a catalogued paper."
+
+policy:
+  allow_implicit_invocation: false
+

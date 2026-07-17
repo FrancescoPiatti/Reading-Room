@@ -1,0 +1,8 @@
+interface:
+  display_name: "Explain Paper"
+  short_description: "Analyze a paper into a Reading Room report"
+  default_prompt: "Use $explain-paper to analyze a paper into the Reading Room."
+
+policy:
+  allow_implicit_invocation: false
+

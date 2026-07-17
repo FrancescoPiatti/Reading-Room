@@ -1,0 +1,8 @@
+interface:
+  display_name: "Deep Dive"
+  short_description: "Add a worked deep dive to a paper report"
+  default_prompt: "Use $deep-dive to add a worked derivation to a paper."
+
+policy:
+  allow_implicit_invocation: false
+

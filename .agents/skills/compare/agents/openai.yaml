@@ -1,0 +1,8 @@
+interface:
+  display_name: "Compare"
+  short_description: "Compare two or three catalogued papers"
+  default_prompt: "Use $compare to compare two catalogued papers."
+
+policy:
+  allow_implicit_invocation: false
+

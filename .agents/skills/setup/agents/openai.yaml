@@ -1,0 +1,8 @@
+interface:
+  display_name: "Setup"
+  short_description: "Configure the reader profile and field"
+  default_prompt: "Use $setup to configure the reader profile and field."
+
+policy:
+  allow_implicit_invocation: false
+

@@ -1,0 +1,8 @@
+interface:
+  display_name: "Learn"
+  short_description: "Discuss a paper and save the distilled chat"
+  default_prompt: "Use $learn to discuss a catalogued paper and save the result."
+
+policy:
+  allow_implicit_invocation: false
+

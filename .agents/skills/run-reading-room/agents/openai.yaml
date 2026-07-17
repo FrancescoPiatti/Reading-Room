@@ -1,0 +1,8 @@
+interface:
+  display_name: "Run Reading Room"
+  short_description: "Drive and screenshot Reading Room work mode"
+  default_prompt: "Use $run-reading-room to drive the app headlessly."
+
+policy:
+  allow_implicit_invocation: true
+
