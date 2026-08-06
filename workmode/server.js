@@ -318,6 +318,37 @@ function notesPathFor(rawId) {
   if (!fs.existsSync(path.join(REPORTS, id, 'digest.json'))) return null;
   return path.join(REPORTS, id, 'notes.md');
 }
+// List catalogued papers (id + title + venue/year) for the Compare / Deep dive /
+// Discuss pickers — a lightweight read of reports/*/digest.json (docs/ doesn't
+// expose the digests, so the client can't read them directly).
+app.get('/api/reports', (req, res) => {
+  const out = [];
+  try {
+    for (const id of fs.readdirSync(REPORTS)) {
+      const dj = path.join(REPORTS, id, 'digest.json');
+      if (!fs.existsSync(dj)) continue;
+      try {
+        const d = JSON.parse(fs.readFileSync(dj, 'utf8'));
+        out.push({ id: d.id || id, title: d.title || id, year: d.year || null, venue: d.venue || (d.published && d.published.venue) || null });
+      } catch (e) {}
+    }
+  } catch (e) {}
+  out.sort((a, b) => (b.year || 0) - (a.year || 0));
+  res.json({ ok: true, reports: out });
+});
+
+// Read one paper's digest (sections + deepdives) — the Deep dive form uses it to
+// list a report's sections and to snapshot before/after so it knows when the run
+// actually landed. id is shape-validated so it can't escape reports/.
+app.get('/api/digest', (req, res) => {
+  const id = String(req.query.id || '').trim();
+  if (!id || !/^[A-Za-z0-9._-]+$/.test(id) || id.indexOf('..') !== -1) return res.status(400).json({ ok: false, error: 'bad id' });
+  const dj = path.join(REPORTS, id, 'digest.json');
+  if (!fs.existsSync(dj)) return res.status(404).json({ ok: false, error: 'no such paper' });
+  try { res.json({ ok: true, digest: JSON.parse(fs.readFileSync(dj, 'utf8')) }); }
+  catch (e) { res.status(500).json({ ok: false, error: 'unreadable digest' }); }
+});
+
 app.get('/api/notes', (req, res) => {
   const p = notesPathFor(req.query.id);
   if (!p) return res.status(400).json({ ok: false, error: 'unknown paper id' });
@@ -565,13 +596,25 @@ wss.on('connection', (ws) => {
 // Digest watcher -> rebuild -> push refresh
 // ----------------------------------------------------------------------------
 const WATCHED_NAMES = ['digest.json', 'compare.json', 'chat.json', 'dismissed.json', 'config.json', 'profile.json'];
+
+// If `p` is exactly <base>/<slug>/<filename>, return <slug>, else null. Lets the
+// watcher tell the browser which report/comparison/discussion just arrived so the
+// one-click GUI flows know when to stop waiting (Analyze/Compare on a fresh `add`,
+// Deep dive on a `change` to an existing digest).
+function slugUnder(base, filename, p) {
+  if (path.basename(p) !== filename) return null;
+  const dir = path.dirname(p);
+  if (path.dirname(dir) !== base) return null;
+  return path.basename(dir);
+}
+
 function startWatcher() {
   // Watch DIRECTORIES (chokidar is recursive) + filter by basename, rather than
   // glob patterns — globs built with path.join use backslashes on Windows, which
   // chokidar/picomatch won't match. Directory watching behaves the same on all OSes.
   // Watch user/ (config/dismissed/profile) when present, else the legacy root file.
-  const targets = [REPORTS, COMPARES];
-  if (fs.existsSync(CHATS)) targets.push(CHATS);
+  // watch CHATS unconditionally (like COMPARES) so the FIRST discussion is detected too
+  const targets = [REPORTS, COMPARES, CHATS];
   targets.push(fs.existsSync(USER_DIR) ? USER_DIR : DISMISSED);
   const watcher = chokidar.watch(targets, {
     ignoreInitial: true,
@@ -586,7 +629,17 @@ function startWatcher() {
       runBuild();
     }, 200);
   };
-  watcher.on('add', trigger).on('change', trigger).on('unlink', trigger);
+  watcher.on('add', (p) => {
+    let s;
+    if ((s = slugUnder(REPORTS, 'digest.json', p))) broadcast({ type: 'report-added', id: s });   // new paper (Analyze)
+    else if ((s = slugUnder(COMPARES, 'compare.json', p))) broadcast({ type: 'compare-added', slug: s }); // new comparison (Compare)
+    else if ((s = slugUnder(CHATS, 'chat.json', p))) broadcast({ type: 'chat-added', slug: s });   // new discussion (Discuss)
+    trigger(p);
+  }).on('change', (p) => {
+    const s = slugUnder(REPORTS, 'digest.json', p);
+    if (s) broadcast({ type: 'report-changed', id: s });   // existing digest changed (Deep dive landed)
+    trigger(p);
+  }).on('unlink', trigger);
   watcher.on('error', (e) => console.error('  ! watcher error:', e.message));
   return watcher;
 }
