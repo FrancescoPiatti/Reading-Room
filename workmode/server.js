@@ -31,6 +31,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const http = require('http');
+const crypto = require('crypto');
 const { spawn, spawnSync } = require('child_process');
 const { Readable } = require('stream');
 
@@ -54,6 +55,10 @@ try {
 // Paths & config
 // ----------------------------------------------------------------------------
 const REPO = path.resolve(__dirname, '..');
+// A stable id for THIS clone, so the client can scope per-copy browser state (e.g. the
+// first-run tutorial flag) even under work mode — where every clone is served from the
+// same loopback origin at path "/", so a path-based key can't tell two clones apart.
+const REPO_KEY = crypto.createHash('sha1').update(REPO).digest('hex').slice(0, 12);
 const DOCS = path.join(REPO, 'docs');
 const REPORTS = path.join(REPO, 'reports');
 const COMPARES = path.join(REPO, 'compares');
@@ -185,7 +190,7 @@ function workmodeSnippet() {
     '<!-- Reading Room work mode (injected by the local server; NOT in docs/ on disk) -->',
     '<link rel="stylesheet" href="/__workmode/vendor/xterm.css">',
     '<link rel="stylesheet" href="/__workmode/workmode.css">',
-    '<script>window.RR_WORKMODE = { ws: "/__workmode/ws", port: ' + ACTUAL_PORT + ' };</script>',
+    '<script>window.RR_WORKMODE = { ws: "/__workmode/ws", port: ' + ACTUAL_PORT + ', root: "' + REPO_KEY + '" };</script>',
     '<script src="/__workmode/vendor/xterm.js"></script>',
     '<script src="/__workmode/vendor/addon-fit.js"></script>',
     '<script src="/__workmode/workmode.js"></script>',
@@ -198,9 +203,10 @@ function injectWorkmode(html) {
   // so checking for that substring would wrongly skip injecting on graph.html.
   if (html.indexOf('/__workmode/workmode.js') !== -1) return html;
   const snip = workmodeSnippet();
-  return html.indexOf('</body>') !== -1
-    ? html.replace('</body>', snip + '\n</body>')
-    : html + snip;
+  // Inject before the LAST </body> — authored digest HTML (or a comment) can contain the
+  // literal "</body>", and splicing at the first would land the scripts mid-content.
+  const i = html.lastIndexOf('</body>');
+  return i !== -1 ? html.slice(0, i) + snip + '\n' + html.slice(i) : html + snip;
 }
 
 // Map a request path to an HTML file inside docs/, or null if it isn't one.
