@@ -14,8 +14,10 @@
          window.RR_runInTerminal(cmd)  — focus the terminal and pre-type cmd
          window.RR_dismissGhost(d)     — POST /api/dismiss (persisted + rebuilt)
 
-   It pre-types commands but never presses Enter and never spawns the AI
-   itself, so the AI's own permission prompts are always preserved.
+   Assistants are launched in AUTO mode (per-CLI flags in AI_CMD) because the GUI
+   flows fire `/… --approve` commands into a hidden session — a permission prompt
+   mid-run would stall the job with nothing on screen. "Show terminal" always
+   exposes the live session. This never uses a provider API or `claude -p`.
    =========================================================================== */
 (function () {
   'use strict';
@@ -224,6 +226,7 @@
   var jobStatusText = '';                        // last status line (re-shown if you reopen the overlay mid-run)
   var activeArm = null;                          // current boot-wait controller (note() on shell output)
   var flowOv = null;                             // the shared full-screen flow overlay
+  var setupDoneAt = 0;                           // /setup finished at this time -> reload on the rebuild that follows (TTL'd)
   var CLR = '\x15';                              // Ctrl+U: clear the input line before (re)typing, so an
                                                  // un-run pre-typed command never accumulates with the next
   var reconnectTimer = null, reconnectDelay = 1500;
@@ -288,11 +291,30 @@
         jobOnBroadcast(m);                          // a hidden Analyze/Compare/Deep dive may be waiting for this
         if (m.type === 'chat-added' && !job) toast('Discussion saved — ' + m.slug, 'Open', function (){ location.href = '/chat/' + encodeURIComponent(m.slug) + '/'; });
       }
-      else if (m.type === 'changed') onRebuilt();
+      else if (m.type === 'setup-done') {
+        // /setup finished (the agent deleted the intake file): close the terminal
+        // drawer as promised by the gears overlay — WITHOUT recording it as the
+        // user's preference (that would kill report-page auto-open forever) —
+        // and tell the account block (which owns that overlay) so it can flip to ✓.
+        closeDrawer(true);
+        setupDoneAt = Date.now();
+        try { window.dispatchEvent(new CustomEvent('rr-setup-done')); } catch (e) {}
+        // Kick one rebuild so a fresh 'changed' arrives deterministically (the agent's
+        // config/profile writes may have been rebuilt BEFORE setup-done fired).
+        fetch('/api/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(function (){});
+      }
+      else if (m.type === 'changed') {
+        // reload to show the personalized header — but only for a rebuild that follows
+        // setup-done promptly. Without the TTL, a stale flag caused a surprise reload
+        // on some unrelated rebuild minutes later.
+        if (setupDoneAt && Date.now() - setupDoneAt < 30000) { setupDoneAt = 0; location.reload(); return; }
+        setupDoneAt = 0;
+        onRebuilt();
+      }
       else if (m.type === 'building') setHint('rebuilding…');
       else if (m.type === 'build-error') {
         setHint('build error');
-        // last non-empty line of build.py's stderr is the most useful one-liner
+        // last non-empty line of scripts/build.py's stderr is the most useful one-liner
         var bline = String(m.error || '').split('\n').map(function(s){ return s.trim(); }).filter(Boolean).pop() || '';
         toast('Build failed' + (bline ? ': ' + bline.slice(0, 160) : ' — see workmode.log'));
       }
@@ -301,7 +323,16 @@
         if (activeArm) { activeArm.cancel(); activeArm = null; }
         if (job) jobOnExit();
       }
-      else if (m.type === 'fatal') { if (term) term.write('\r\n\x1b[31m' + m.msg + '\x1b[0m\r\n'); }
+      else if (m.type === 'fatal') {
+        // pty unavailable (node-pty not built): a spawn/respawn was answered with
+        // 'fatal', never 'ready' — reset the handshake state or awaitingReady sticks
+        // true forever ("launching …" hint frozen, every later launch queued into limbo).
+        if (term) term.write('\r\n\x1b[31m' + m.msg + '\x1b[0m\r\n');
+        spawned = false; awaitingReady = false; wantRespawn = false; pending = []; afterFlush = null;
+        setHint('terminal unavailable — run `npm install` in workmode/');
+        if (activeArm) { activeArm.cancel(); activeArm = null; }
+        if (job) jobOnExit();
+      }
     };
     ws.onclose = function (){
       dot.classList.remove('rr-live'); spawned = false; awaitingReady = false;
@@ -343,11 +374,13 @@
     fitSoon();
     if (term) term.focus();
   }
-  function closeDrawer(){
+  // noPersist: close the drawer without recording "closed" as the user's choice —
+  // for programmatic closes (setup finished), so report pages keep auto-opening it.
+  function closeDrawer(noPersist){
     drawer.classList.remove('rr-open');
     document.body.classList.remove('rr-wm-bodyopen');
     launch.classList.remove('rr-hidden');
-    lsSet(LS_OPEN, '0');
+    if (!noPersist) lsSet(LS_OPEN, '0');
     wantSpawn = false;            // don't re-spawn a hidden shell on reconnect while closed
   }
   function toggleDrawer(){ isOpen() ? closeDrawer() : openDrawer(); }
@@ -384,6 +417,14 @@
   // mid-session inside it — typing `codex` then would go INTO claude's prompt
   // instead of the shell. The server kills the old pty and spawns a new one; the
   // launch command flushes only when the fresh shell's 'ready' arrives.
+  // Every assistant is launched in AUTO mode: the GUI flows fire `/… --approve`
+  // commands into it unattended, and a permission prompt mid-run would silently
+  // stall a hidden job. The flags are per-CLI (claude/codex/gemini).
+  var AI_CMD = {
+    claude: 'claude --permission-mode bypassPermissions',
+    codex:  'codex --dangerously-bypass-approvals-and-sandbox',
+    gemini: 'gemini --yolo',
+  };
   // opts.headless: run the AI in the shared pty WITHOUT opening the drawer (the Analyze
   // flow watches the filesystem instead of the terminal). opts.then: called once, right
   // after the launch command flushes into the fresh shell (used to arm the analyze cmd).
@@ -392,8 +433,10 @@
     if (!opts.headless) openDrawer();
     endChatBtn.hidden = true;                          // a freshly launched agent has no /learn chat yet
     setHint('launching ' + name + ' …');
-    pending = [name + '\r'];            // latest action wins; no leftover pre-typed command
-    afterFlush = opts.then || null;
+    pending = [(AI_CMD[name] || name) + '\r'];         // latest action wins; no leftover pre-typed command
+    // once the launch line is typed, drop the "launching …" hint (it used to stick
+    // around forever on a plain ▾ launch); flows override this with their own step
+    afterFlush = opts.then || function (){ setHint(''); };
     if (ws && ws.readyState === 1 && !awaitingReady) {
       spawned = false; awaitingReady = true;
       send({ type: 'respawn', cols: term ? term.cols : 80, rows: term ? term.rows : 24 });
@@ -439,6 +482,7 @@
   /* ------------------------------------------- hooks the graph add-on calls */
   window.RR_runInTerminal = function (cmd){ preType(cmd); };
   window.RR_launchAgent = function (name){ launchAgent(name); };   // Setup's "Launch claude/codex/gemini"
+  window.RR_openTerminal = function (){ openDrawer(); };           // Setup busy-box "Show terminal"
   // Setup's Finish: auto-run cmd in the EXISTING shell, WITHOUT opening/raising the
   // drawer. Returns true if it reached a live shell, false if none is running yet.
   window.RR_submitCommand = function (cmd){

@@ -42,7 +42,7 @@ if %NODE_MAJOR% LSS 18 (
 if not exist "workmode\node_modules" (
   echo   Installing work-mode dependencies ^(first run only - may take a minute^)...
   pushd workmode
-  call npm install
+  call npm install --no-audit --no-fund
   if errorlevel 1 (
     echo.
     echo   X  npm install failed. See the messages above.
@@ -50,6 +50,10 @@ if not exist "workmode\node_modules" (
     pause
     exit /b 1
   )
+  REM node-pty is a native module; if npm's script policy skipped its build the
+  REM terminal would be disabled - rebuild it explicitly in that case.
+  node -e "require('node-pty')" >nul 2>&1
+  if errorlevel 1 call npm rebuild node-pty
   popd
 )
 

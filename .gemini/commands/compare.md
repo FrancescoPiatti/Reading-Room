@@ -44,4 +44,4 @@ Match this schema exactly:
 - `verdict` is optional; include it when there's a real "when to use which" takeaway.
 
 ## Then build and report back
-Run `python verify.py --build` (builds, then runs QA; fix any `✗` failures), confirm `compares/<slug>/compare.json` and `docs/compare/<slug>/index.html` were written (and that each compared report now shows the comparison under **Connections → Compared in**), and tell the user to open/refresh `docs/index.html` (the comparison is listed there) or go straight to the compare page.
+Run `python scripts/verify.py --build` (builds, then runs QA; fix any `✗` failures), confirm `compares/<slug>/compare.json` and `docs/compare/<slug>/index.html` were written (and that each compared report now shows the comparison under **Connections → Compared in**), and tell the user to open/refresh `docs/index.html` (the comparison is listed there) or go straight to the compare page.

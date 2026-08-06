@@ -8,15 +8,15 @@ Runs the checks that are easy to forget by hand:
   • cites[].id are normalized arXiv ids; `published` metadata is well-formed
   • field packs (templates/fields/*.json) carry the keys the loader expects
   • no extracted .txt scratch left in papers/
-  • `python build.py` produces no leftover {{PLACEHOLDERS}} in docs/
+  • `python scripts/build.py` produces no leftover {{PLACEHOLDERS}} in docs/
   • embedded data blobs (CATALOGUE / GRAPH / LIBRARY) parse as JSON
   • <script> tags are balanced on every generated page
   • per-paper cite.bib exists; comparison pages reference real papers
   • every themed color pair in base.css meets WCAG AA contrast
 
 Usage:
-  python verify.py            # assumes docs/ is already built
-  python verify.py --build    # run build.py first, then verify
+  python scripts/verify.py            # assumes docs/ is already built
+  python scripts/verify.py --build    # run scripts/build.py first, then verify
 Exit code is non-zero if any check fails (CI-friendly).
 """
 
@@ -26,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent.parent   # scripts/ -> repo root
 REPORTS = ROOT / "reports"
 COMPARES = ROOT / "compares"
 CHATS = ROOT / "chats"
@@ -360,7 +360,7 @@ def check_placeholders(r):
     r.section("Template placeholders")
     pages = html_pages()
     if not pages:
-        r.fail("docs/ has no pages — run build.py first")
+        r.fail("docs/ has no pages — run scripts/build.py first")
         return
     bad = False
     for p in pages:
@@ -466,7 +466,7 @@ def check_contrast(r):
 def main():
     if "--build" in sys.argv:
         print("Running build.py …")
-        res = subprocess.run([sys.executable, "build.py"], cwd=ROOT)
+        res = subprocess.run([sys.executable, str(ROOT / "scripts" / "build.py")], cwd=ROOT)
         if res.returncode != 0:
             print("build.py failed", file=sys.stderr)
             return 1

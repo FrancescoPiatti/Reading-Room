@@ -30,7 +30,7 @@ workmode/workmode.pid
 # user config & reading state (profile, dismissals, field config, intake) — gitignored
 # so app updates (git pull / npm / Tauri-Electron) never overwrite the user's settings.
 # Shipped defaults live in profile.example.json / config.example.json (committed).
-user/
+user/*
 !user/.gitkeep
 
 # showcase website (copied into the separate GitHub personal site; not part of this repo)
@@ -45,3 +45,4 @@ backups/
 # Claude Code per-user local state (not for the shared template)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+workmode/.install.lock

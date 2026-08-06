@@ -191,7 +191,7 @@ async function smoke() {
 }
 
 function build() {
-  const r = spawnSync('python3', ['verify.py', '--build'], { cwd: REPO, encoding: 'utf8' });
+  const r = spawnSync('python3', ['scripts/verify.py', '--build'], { cwd: REPO, encoding: 'utf8' });
   const tail = (r.stdout || '').trim().split('\n').slice(-3).join('\n');
   console.log(tail || r.stderr);
   process.exit(r.status || 0);

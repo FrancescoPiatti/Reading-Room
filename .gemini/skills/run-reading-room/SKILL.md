@@ -25,7 +25,7 @@ node .gemini/skills/run-reading-room/driver.mjs smoke            # 5 health+secu
 node .gemini/skills/run-reading-room/driver.mjs term 'echo hi'   # run a shell command in the app's shared pty
 node .gemini/skills/run-reading-room/driver.mjs shot papers/hornik1989/ out.png 8000   # CDP screenshot (waitMs last)
 node .gemini/skills/run-reading-room/driver.mjs shot / out.png                          # catalogue
-node .gemini/skills/run-reading-room/driver.mjs build            # python3 verify.py --build (build + QA)
+node .gemini/skills/run-reading-room/driver.mjs build            # python3 scripts/verify.py --build (build + QA)
 node .gemini/skills/run-reading-room/driver.mjs stop
 ```
 
@@ -43,7 +43,7 @@ node .gemini/skills/run-reading-room/driver.mjs stop
 Template/build/digest changes don't need the server at all:
 
 ```bash
-python3 verify.py --build     # rebuild docs/ + full QA — fix ✗ before shipping
+python3 scripts/verify.py --build     # rebuild docs/ + full QA — fix ✗ before shipping
 ```
 
 Then screenshot the affected page via `shot` to confirm it renders (the

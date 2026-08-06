@@ -92,7 +92,7 @@ Setup writes this for you; every key is optional and hand-editable:
   "site_title": "Reading Room",              // header / page titles / footer
   "fields": ["ml"],                           // shipped packs to merge, from templates/fields/
   "tags": ["deep-learning", "theory"],        // explicit vocabulary — WINS over the packs
-  "max_tags": 4,                              // per-paper tag cap (verify.py enforces)
+  "max_tags": 4,                              // per-paper tag cap (scripts/verify.py enforces)
   "sections": [                               // focus-view tabs, in display order
     {"key": "summary", "title": "Summary"}
   ],
@@ -106,4 +106,4 @@ Setup writes this for you; every key is optional and hand-editable:
 How merging works: `fields` unions the named packs' tag vocabularies **in the order listed**, and takes each section from the **first** pack that declares its key — so `["bio", "ml"]` and `["ml", "bio"]` differ in tab order/titles. Anything you set explicitly here (e.g. `tags`) **wins over** the packs, which only fill in what you omit. Two rules: keep tags broad (2–4 per paper, the build enforces the vocabulary), and **never rename a section `key`** — keys like `math` are storage keys inside every existing digest (a pack/config only retitles them, e.g. "Methods & statistics"); renaming one blanks that tab on every report. Adding *new* keys is always fine.
 
 ## License
-[MIT](LICENSE) © Francesco Piatti. Your own paper digests, notes, and PDFs are yours; the license covers the Reading Room tooling. The footer credit ("created by Francesco Piatti") is the tool's attribution and is hardcoded in `build.py` — forks are welcome under the MIT terms and may keep or amend it; `site_title` renames everything else without touching it.
+[MIT](LICENSE) © Francesco Piatti. Your own paper digests, notes, and PDFs are yours; the license covers the Reading Room tooling. The footer credit ("created by Francesco Piatti") is the tool's attribution and is hardcoded in `scripts/build.py` — forks are welcome under the MIT terms and may keep or amend it; `site_title` renames everything else without touching it.

@@ -21,13 +21,17 @@
 # The static GitHub Pages browse path is unaffected; this only runs things locally.
 # ============================================================================
 
+# osascript is overridable so agents/tests can run this script headless without
+# popping real dialogs (RR_OSASCRIPT=/path/to/stub). Humans never set it.
+OSA="${RR_OSASCRIPT:-/usr/bin/osascript}"
+
 # Repo root = three levels up from Contents/MacOS/ (…/ReadingRoom.app/Contents/MacOS)
 REPO="$(cd "$(dirname "$0")/../../.." && pwd)" || exit 1
 cd "$REPO" || exit 1
 
 # Show a native error dialog (no console exists for an .app launch) and quit.
 die() {
-  /usr/bin/osascript -e "display dialog \"Reading Room\n\n$1\" buttons {\"OK\"} default button 1 with icon caution with title \"Reading Room\"" >/dev/null 2>&1
+  "$OSA" -e "display dialog \"Reading Room\n\n$1\" buttons {\"OK\"} default button 1 with icon caution with title \"Reading Room\"" >/dev/null 2>&1
   exit 1
 }
 
@@ -40,7 +44,7 @@ die() {
 # the one-time grant instead. (Updating the app changes its TCC identity, so the
 # grant may need re-doing after an update — same dialog, same 10 seconds.)
 if ! cat "$REPO/workmode/package.json" >/dev/null 2>&1; then
-  BTN="$(/usr/bin/osascript -e 'button returned of (display dialog "Reading Room\n\nmacOS is blocking this app from reading its own folder (it lives in a protected location — OneDrive, Desktop or Documents).\n\nGrant access once in System Settings → Privacy & Security:\n• Files & Folders → ReadingRoom → allow the folder, or\n• Full Disk Access → + → add ReadingRoom.app\n\nThen open Reading Room again." buttons {"OK", "Open System Settings"} default button "Open System Settings" with icon caution with title "Reading Room")' 2>/dev/null)"
+  BTN="$("$OSA" -e 'button returned of (display dialog "Reading Room\n\nmacOS is blocking this app from reading its own folder (it lives in a protected location — OneDrive, Desktop or Documents).\n\nGrant access once in System Settings → Privacy & Security:\n• Files & Folders → ReadingRoom → allow the folder, or\n• Full Disk Access → + → add ReadingRoom.app\n\nThen open Reading Room again." buttons {"OK", "Open System Settings"} default button "Open System Settings" with icon caution with title "Reading Room")' 2>/dev/null)"
   [ "$BTN" = "Open System Settings" ] && open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" >/dev/null 2>&1
   exit 1
 fi
@@ -51,16 +55,16 @@ offer_shortcut() {
   MARKER="$REPO/user/.desktop-shortcut-offered"
   [ -f "$MARKER" ] && return 0
   mkdir -p "$REPO/user" && : >"$MARKER"   # one-shot, whatever they choose
-  BTN="$(/usr/bin/osascript -e 'button returned of (display dialog "Add a Reading Room shortcut to your Desktop?\n\nYou can move it anywhere later — it is just a link to this app." buttons {"Not now", "Choose folder…", "Add to Desktop"} default button "Add to Desktop" with title "Reading Room" with icon note)' 2>/dev/null)"
+  BTN="$("$OSA" -e 'button returned of (display dialog "Add a Reading Room shortcut to your Desktop?\n\nYou can move it anywhere later — it is just a link to this app." buttons {"Not now", "Choose folder…", "Add to Desktop"} default button "Add to Desktop" with title "Reading Room" with icon note)' 2>/dev/null)"
   DEST=""
   case "$BTN" in
     "Add to Desktop") DEST="$HOME/Desktop" ;;
-    "Choose folder…") DEST="$(/usr/bin/osascript -e 'POSIX path of (choose folder with prompt "Where should the Reading Room shortcut go?")' 2>/dev/null)" ;;
+    "Choose folder…") DEST="$("$OSA" -e 'POSIX path of (choose folder with prompt "Where should the Reading Room shortcut go?")' 2>/dev/null)" ;;
     *) return 0 ;;
   esac
   if [ -n "$DEST" ] && [ -d "$DEST" ]; then
     ln -sfn "$REPO/ReadingRoom.app" "${DEST%/}/Reading Room.app" 2>/dev/null \
-      && /usr/bin/osascript -e 'display notification "Shortcut added." with title "Reading Room"' >/dev/null 2>&1
+      && "$OSA" -e 'display notification "Shortcut added." with title "Reading Room"' >/dev/null 2>&1
   fi
 }
 
@@ -109,9 +113,27 @@ if [ "$NODE_MAJOR" -lt 18 ]; then
 fi
 
 # --- install work-mode dependencies on first run ----------------------------
+# npm install takes a minute or two, and a double-clicked .app shows NOTHING
+# while it runs (no Dock icon, no window, no dialog) — without feedback a first
+# launch looks dead, and a second impatient double-click would race this install.
+# So: notify up front, and hold a lock for the duration.
+LOCK="$REPO/workmode/.install.lock"
 if [ ! -d "workmode/node_modules" ]; then
-  ( cd workmode && npm install ) >"$REPO/workmode/install.log" 2>&1 \
-    || die "Installing work-mode dependencies failed. See workmode/install.log for details."
+  if [ -f "$LOCK" ] && [ -n "$(find "$LOCK" -mmin -15 2>/dev/null)" ]; then
+    "$OSA" -e 'display notification "Still setting up (first run) — the window opens when it finishes." with title "Reading Room"' >/dev/null 2>&1
+    exit 0
+  fi
+  : >"$LOCK"
+  "$OSA" -e 'display notification "First-run setup (about a minute) — the window opens when it is ready." with title "Reading Room"' >/dev/null 2>&1
+  ( cd workmode && npm install --no-audit --no-fund ) >"$REPO/workmode/install.log" 2>&1
+  RC=$?
+  rm -f "$LOCK"
+  [ "$RC" -ne 0 ] && die "Installing work-mode dependencies failed. See workmode/install.log for details."
+  # node-pty is a native module; if npm's script policy skipped its build the app
+  # would open with the terminal disabled — rebuild it explicitly in that case.
+  if ! ( cd workmode && node -e "require('node-pty')" ) >/dev/null 2>&1; then
+    ( cd workmode && npm rebuild node-pty ) >>"$REPO/workmode/install.log" 2>&1
+  fi
 fi
 
 # --- already running? then there's nothing to do (its window is open) -------

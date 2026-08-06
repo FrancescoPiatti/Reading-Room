@@ -31,4 +31,4 @@ Apply only **confident matches** (the conservative test in step 2 — a real, no
 Do **not** change `source_url` (keep the arXiv abstract link), `tags`, `sections`, `cites`, `status`, `priority`, or anything else. If DBLP is unreachable for a confirmed match, fall back to the structured `published` object (`{type, venue, year}`) with only fields you are sure of — never hand-fabricate page numbers/volume.
 
 ## 4. Build and report back
-Run `python verify.py --build`, fix any `✗` failures, and report: which papers were updated (old → new venue), which were checked and remain preprints, and confirm the new `cite.bib` files are the published entries. Refresh `docs/index.html` to see the updated venues.
+Run `python scripts/verify.py --build`, fix any `✗` failures, and report: which papers were updated (old → new venue), which were checked and remain preprints, and confirm the new `cite.bib` files are the published entries. Refresh `docs/index.html` to see the updated venues.

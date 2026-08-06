@@ -8,14 +8,14 @@ Pure stdlib (matches build.py / verify.py). Bundles everything the reader owns:
   user/      profile.json, config.json, dismissed.json (+ reading-state.json if you saved one)
   papers/    downloaded PDFs                   (optional; --no-pdfs to skip)
 
-The generated docs/ site is NOT included — it's fully rebuildable with `python build.py`.
+The generated docs/ site is NOT included — it's fully rebuildable with `python scripts/build.py`.
 Your status/priority *stars* live in the browser (localStorage), not on disk, so they are
 not in this zip — export those from the header avatar menu → "Back up".
 
 Usage:
-  python archive.py export [-o OUT.zip] [--no-pdfs]
-  python archive.py import BACKUP.zip [--replace] [--no-backup] [--force]
-  python archive.py list BACKUP.zip
+  python scripts/archive.py export [-o OUT.zip] [--no-pdfs]
+  python scripts/archive.py import BACKUP.zip [--replace] [--no-backup] [--force]
+  python scripts/archive.py list BACKUP.zip
 
 `import` merges by default (files in the zip are written over/added; nothing else is
 deleted) and first writes a safety snapshot of your current data to backups/. Use
@@ -30,7 +30,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent   # scripts/ -> repo root
 BACKUPS = ROOT / "backups"
 
 # top-level dirs holding user-owned data (docs/ is generated → rebuilt, never backed up)
@@ -201,7 +201,7 @@ def main():
     if args.cmd == "import":
         n, man = do_import(args.zip, include_backup=not args.no_backup, replace=args.replace, force=args.force)
         print(f"  ✓ restored {n} file(s) from {args.zip}" + (" (replace)" if args.replace else " (merged)"))
-        print("    now run  python build.py  to regenerate the site.")
+        print("    now run  python scripts/build.py  to regenerate the site.")
         return 0
 
     if args.cmd == "list":

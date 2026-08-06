@@ -714,6 +714,27 @@ body.rr-modal-open { overflow: hidden; }
   box-shadow: var(--shadow-card); font-family: var(--sans); color: var(--ink);
 }
 .rr-setup-finishbar[hidden] { display: none; }
+
+/* "Setting up…" busy box (work mode): shown while the agent applies /setup */
+.rr-setup-busy {
+  position: fixed; inset: 0; z-index: 10070;
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+  background: rgba(10, 12, 18, 0.42);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.rr-setup-busy[hidden] { display: none; }
+.rr-setup-busy-card {
+  background: var(--bg-card); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: var(--shadow-card); padding: 34px 40px 28px; text-align: center;
+  max-width: 420px; font-family: var(--sans);
+}
+.rr-setup-gear { width: 44px; height: 44px; color: var(--accent); margin-bottom: 14px; }
+.rr-setup-gear.rr-spin { animation: rr-gear-spin 2.4s linear infinite; }
+@keyframes rr-gear-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .rr-setup-gear.rr-spin { animation-duration: 8s; } }
+.rr-setup-busy-msg { color: var(--ink); font-size: 16.5px; font-weight: 600; margin-bottom: 6px; }
+.rr-setup-busy-sub { color: var(--ink-faint); font-size: 13px; line-height: 1.55; margin-bottom: 18px; }
+.rr-setup-busy-term[hidden] { display: none; }
 .rr-setup-finishbar .rr-sfb-msg { flex: 1; min-width: 200px; font-size: 13px; line-height: 1.45; color: var(--ink); }
 
 /* ---- catalogue "show more" pager (index): a hairline rule with a centered button ---- */

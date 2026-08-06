@@ -1,11 +1,11 @@
 <!-- ===========================================================================
   account.html — avatar menu + Profile / Setup modals.
 
-  PURELY ADDITIVE. build.py's finalize_page() injects this at the end of the page
+  PURELY ADDITIVE. scripts/build.py's finalize_page() injects this at the end of the page
   body on every rendered page, and injects the avatar button (.rr-acct-btn) next to the theme
   toggle in the topbar. Styling uses ONLY base.css tokens, so it themes light/dark
   for free. {{ACCOUNT_PROFILE_JSON}} / {{ACCOUNT_SECTIONS_JSON}} are filled in by
-  build.py (embedded JS literals, with the </ guard).
+  scripts/build.py (embedded JS literals, with the </ guard).
 
   • Profile  — a blurred-backdrop modal showing the current profile.json (read-only).
   • Setup    — a blurred-backdrop questionnaire (Back/Next; no terminal) pre-filled
@@ -71,7 +71,7 @@
     </div>
     <div class="rr-modal-body">
       <p class="rr-q-hint">Your <b>reading status</b>, <b>priority stars</b>, <b>custom tags / collections</b>, dismissed graph nodes, and theme are stored in this browser only. Export them to a small JSON file to move them to another browser or device, or as a backup.</p>
-      <p class="rr-q-hint">Your analysed papers, comparisons and discussions are files on disk — back those up with <code>/backup export</code> (or <code>python archive.py export</code>), which writes a full zip.</p>
+      <p class="rr-q-hint">Your analysed papers, comparisons and discussions are files on disk — back those up with <code>/backup export</code> (or <code>python scripts/archive.py export</code>), which writes a full zip.</p>
       <p class="rr-q-note" id="rr-backup-msg" hidden></p>
     </div>
     <div class="rr-modal-foot">
@@ -101,6 +101,18 @@
       <button type="button" class="rr-btn" id="rr-tut-next">Next</button>
       <button type="button" class="rr-btn rr-btn-go" id="rr-tut-finish" hidden>Set up your profile &rarr;</button>
     </div>
+  </div>
+</div>
+
+<!-- "Setting up…" busy box (work mode only). Shown while the agent applies /setup;
+     the work-mode client closes the terminal drawer and fires the `rr-setup-done`
+     window event when the intake file disappears, which flips this to its ✓ state. -->
+<div class="rr-setup-busy" id="rr-setup-busy" hidden>
+  <div class="rr-setup-busy-card" role="status" aria-live="polite">
+    <svg class="rr-setup-gear" id="rr-setup-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    <div class="rr-setup-busy-msg" id="rr-setup-busy-msg">Setting up your {{SITE_TITLE}}…</div>
+    <div class="rr-setup-busy-sub" id="rr-setup-busy-sub">The assistant is applying your answers — this takes a minute.</div>
+    <button type="button" class="rr-btn rr-btn-ghost rr-setup-busy-term" id="rr-setup-busy-term">Show terminal</button>
   </div>
 </div>
 
@@ -238,7 +250,7 @@
   /* --------------------------------------------------------------- backup */
   // Reading state (status / priority / dismissals / theme) lives in localStorage, per
   // browser. Export/import it as a small JSON so it can move between browsers/devices.
-  // The on-disk data (reports/compares/chats) is handled by archive.py / the /backup command.
+  // The on-disk data (reports/compares/chats) is handled by scripts/archive.py / the /backup command.
   var backupMsgEl   = document.getElementById('rr-backup-msg');
   var backupCountEl = document.getElementById('rr-backup-count');
   var backupFileEl  = document.getElementById('rr-backup-file');
@@ -471,9 +483,51 @@
     if (!pendingProf) { hideFinishBar(); return; }
     sfbApply.disabled = true; sfbMsg.textContent = 'Applying your setup…';
     postIntakeThenSetup(pendingProf).then(function (sent){
-      if (sent) { if (window.RR_toast) window.RR_toast('Setup sent — the agent will apply it.'); hideFinishBar(); }
+      if (sent) { hideFinishBar(); setupBusy('show'); }
       else { sfbApply.disabled = false; sfbMsg.innerHTML = 'No agent yet — start it in the terminal, then apply.'; }
     }).catch(function (){ sfbApply.disabled = false; sfbMsg.textContent = 'Could not apply — try again.'; });
+  });
+
+  /* ---- "Setting up…" busy box (work mode) -------------------------------
+     Shown once /setup is sent to the agent. The work-mode client fires the
+     `rr-setup-done` window event when the intake file disappears (= the agent
+     finished) and closes the terminal drawer; we flip to ✓ and the page reloads
+     (work mode reloads on the rebuild; the timer here is only a fallback). */
+  var busyBox = document.getElementById('rr-setup-busy');
+  var busyMsg = document.getElementById('rr-setup-busy-msg');
+  var busySub = document.getElementById('rr-setup-busy-sub');
+  var busyGear = document.getElementById('rr-setup-gear');
+  var busyTerm = document.getElementById('rr-setup-busy-term');
+  var busyMsg0 = busyMsg ? busyMsg.textContent : '';
+  var busySub0 = busySub ? busySub.textContent : '';
+  var busyFallback = null;
+  var busyActive = false;                       // a setup run is in flight (box may be HIDDEN if the
+                                                // user clicked "Show terminal" — done must still land)
+  function setupBusy(state){                    // 'show' | 'done' | 'hide'
+    if (!busyBox) return;
+    if (busyFallback) { clearTimeout(busyFallback); busyFallback = null; }
+    if (state === 'show') {
+      busyActive = true;
+      busyMsg.textContent = busyMsg0; busySub.textContent = busySub0;
+      busyGear.classList.add('rr-spin'); busyTerm.hidden = false;
+      busyBox.removeAttribute('hidden');
+    } else if (state === 'done') {
+      if (!busyActive) return;                  // no setup in flight (e.g. box never shown)
+      busyActive = false;
+      busyGear.classList.remove('rr-spin'); busyTerm.hidden = true;
+      busyMsg.textContent = 'Setup applied ✓';
+      busySub.textContent = 'Refreshing to show your personalized setup…';
+      busyBox.removeAttribute('hidden');        // re-show even if the user was watching the terminal
+      busyFallback = setTimeout(function (){ location.reload(); }, 8000);
+    } else {
+      busyBox.setAttribute('hidden','');        // 'hide' keeps busyActive — a later done still lands
+    }
+  }
+  window.RR_setupBusy = setupBusy;              // seam for work mode + tests
+  window.addEventListener('rr-setup-done', function (){ setupBusy('done'); });
+  if (busyTerm) busyTerm.addEventListener('click', function (){
+    setupBusy('hide');
+    if (typeof window.RR_openTerminal === 'function') window.RR_openTerminal();
   });
 
   // Launch the chosen AI (Claude/Codex/Gemini) in the integrated terminal (work mode only). We snapshot the
@@ -506,7 +560,7 @@
       // raising the drawer. Needs a running agent (hence the note + guard).
       postIntakeThenSetup(prof).then(function (sent){
         finishBtn.disabled = false;
-        if (sent) closeModal(setupModal);
+        if (sent) { closeModal(setupModal); setupBusy('show'); }
         else flash('Launch an AI (Claude, Codex, or Gemini) first (button below), then press Finish.');
       }).catch(function (){ finishBtn.disabled = false; showManual(prof); });
     } else {
@@ -534,7 +588,7 @@
   /* -------------------------------------------------------------- tutorial */
   // A bigger, stepped walkthrough (same family as Setup). Auto-opens on first launch
   // and hands off to Setup; re-openable from the avatar menu. Image steps show real
-  // screenshots (assets/shots/, {{ASSET_ROOT}} resolved per page depth by build.py);
+  // screenshots (assets/shots/, {{ASSET_ROOT}} resolved per page depth by scripts/build.py);
   // the GIF steps are still placeholders. Step text is authored/trusted (<b>/<code> ok).
   var TUTORIAL = [
     { shot:'image', img:'{{ASSET_ROOT}}assets/shots/catalogue.png',

@@ -14,7 +14,7 @@
  *     integrated terminal (you run an AI — claude / codex / gemini — and
  *     `/explain-paper` yourself; this never bypasses the AI's permission prompts);
  *   • a chokidar watcher on reports/ (+ compares/ + dismissed.json) re-runs the
- *     EXISTING `python build.py` when a digest changes and pushes a refresh to
+ *     EXISTING `python scripts/build.py` when a digest changes and pushes a refresh to
  *     the browser (it watches files — it does NOT parse terminal output);
  *   • small local API routes that call the existing build step and persist
  *     ghost dismissals to dismissed.json.
@@ -55,6 +55,27 @@ try {
 // Paths & config
 // ----------------------------------------------------------------------------
 const REPO = path.resolve(__dirname, '..');
+
+// --- PATH augmentation -------------------------------------------------------
+// A double-clicked .app inherits launchd's minimal PATH, so AI CLIs installed in
+// the usual per-user locations (claude/codex live in ~/.local/bin, npm globals in
+// /opt/homebrew/bin or ~/.npm-global/bin) are invisible to which() AND to the pty
+// shell's environment — the app then greys out assistants that ARE installed.
+// Append every standard install dir that exists; mutating process.env.PATH covers
+// which(), the pty spawn, and the build child in one place.
+(function augmentPath() {
+  const home = os.homedir();
+  const extras = process.platform === 'win32'
+    ? [path.join(process.env.APPDATA || '', 'npm'),
+       path.join(home, 'AppData', 'Local', 'Programs', 'claude')]
+    : ['/opt/homebrew/bin', '/usr/local/bin',
+       path.join(home, '.local', 'bin'),        // claude/codex native installers
+       path.join(home, '.npm-global', 'bin'),   // npm prefix installs
+       path.join(home, 'bin')];
+  const cur = (process.env.PATH || '').split(path.delimiter);
+  const add = extras.filter((d) => d && !cur.includes(d) && fs.existsSync(d));
+  if (add.length) process.env.PATH = cur.concat(add).join(path.delimiter);
+})();
 // A stable id for THIS clone, so the client can scope per-copy browser state (e.g. the
 // first-run tutorial flag) even under work mode — where every clone is served from the
 // same loopback origin at path "/", so a path-based key can't tell two clones apart.
@@ -68,7 +89,7 @@ const USER_DIR = path.join(REPO, 'user');
 const CLIENT = path.join(__dirname, 'client');
 const NODE_MODULES = path.join(__dirname, 'node_modules');
 
-// User config/state lives in user/ (gitignored, update-safe). Mirror build.py's
+// User config/state lives in user/ (gitignored, update-safe). Mirror scripts/build.py's
 // user_path(): prefer user/<name>, fall back to the legacy repo-root path for reads;
 // always write to user/ when that dir exists so app updates never clobber it.
 function userPath(name) {
@@ -82,7 +103,12 @@ function userWritePath(name) {
   return fs.existsSync(USER_DIR) ? path.join(USER_DIR, name) : path.join(REPO, name);
 }
 const DISMISSED = userPath('dismissed.json');
-const INTAKE = userWritePath('.setup-intake.json');
+// NOTE: the intake path must be computed PER REQUEST (userWritePath resolves by
+// whether user/ exists, and user/ can be created after the server starts — a fresh
+// clone's launcher or /setup mkdirs it). A module-load constant here once made the
+// POST write to the repo root while the watcher watched user/, so the "setup done"
+// unlink was never seen and the app's busy box span forever.
+const ROOT_INTAKE = path.join(REPO, '.setup-intake.json');
 
 const HOST = '127.0.0.1';
 const WANT_PORT = parseInt(process.env.RR_PORT || '4317', 10);
@@ -143,7 +169,7 @@ function pythonCmd() {
 const PY = pythonCmd();
 
 // ----------------------------------------------------------------------------
-// Build runner (calls the EXISTING python build.py — never reimplements it)
+// Build runner (calls the EXISTING python scripts/build.py — never reimplements it)
 // ----------------------------------------------------------------------------
 let building = false;
 let buildQueued = false;
@@ -158,7 +184,7 @@ function runBuild(cb) {
   if (building) { buildQueued = true; return; } // a fresh build runs after this one
   building = true;
   broadcast({ type: 'building' });
-  const child = spawn(PY, ['build.py'], { cwd: REPO });
+  const child = spawn(PY, ['scripts/build.py'], { cwd: REPO });
   let err = '';
   child.stderr.on('data', (d) => { err = (err + d.toString()).slice(-8000); }); // cap as we append
   child.stdout.on('data', () => {}); // drain to avoid backpressure stalls
@@ -170,7 +196,7 @@ function runBuild(cb) {
       broadcast({ type: 'changed' });
     } else {
       const msg = (startupErr || err || ('exit ' + code)).slice(-400);
-      console.error('  ✗ build.py:', msg);
+      console.error('  ✗ scripts/build.py:', msg);
       lastBuildError = msg;
       broadcast({ type: 'build-error', error: msg });
     }
@@ -385,7 +411,7 @@ app.post('/api/setup-intake', (req, res) => {
     return res.status(400).json({ ok: false, error: 'profile object required' });
   }
   try {
-    fs.writeFileSync(INTAKE, JSON.stringify(p, null, 2) + '\n');
+    fs.writeFileSync(userWritePath('.setup-intake.json'), JSON.stringify(p, null, 2) + '\n');
   } catch (e) {
     console.error('  ! setup-intake write failed:', e.message);
     return res.status(500).json({ ok: false, error: 'failed to save setup answers' });
@@ -618,10 +644,14 @@ function startWatcher() {
   // Watch DIRECTORIES (chokidar is recursive) + filter by basename, rather than
   // glob patterns — globs built with path.join use backslashes on Windows, which
   // chokidar/picomatch won't match. Directory watching behaves the same on all OSes.
-  // Watch user/ (config/dismissed/profile) when present, else the legacy root file.
-  // watch CHATS unconditionally (like COMPARES) so the FIRST discussion is detected too
-  const targets = [REPORTS, COMPARES, CHATS];
-  targets.push(fs.existsSync(USER_DIR) ? USER_DIR : DISMISSED);
+  // Watch every location UNCONDITIONALLY — never sample existence at startup.
+  // user/ may be created AFTER the server starts (fresh clone: the launcher or
+  // /setup mkdirs it) and chokidar happily watches not-yet-existing paths;
+  // sampling once froze the watch set and silently dropped config/profile/intake
+  // events for the whole session. DISMISSED covers a legacy root dismissed.json
+  // (a duplicate of user/ on migrated repos — chokidar dedups); ROOT_INTAKE covers
+  // a legacy root .setup-intake.json.
+  const targets = [REPORTS, COMPARES, CHATS, USER_DIR, DISMISSED, ROOT_INTAKE];
   const watcher = chokidar.watch(targets, {
     ignoreInitial: true,
     awaitWriteFinish: { stabilityThreshold: 250, pollInterval: 50 },
@@ -645,7 +675,12 @@ function startWatcher() {
     const s = slugUnder(REPORTS, 'digest.json', p);
     if (s) broadcast({ type: 'report-changed', id: s });   // existing digest changed (Deep dive landed)
     trigger(p);
-  }).on('unlink', trigger);
+  }).on('unlink', (p) => {
+    // /setup deletes the intake file as its last step — that's the "setup finished"
+    // signal the app's gears overlay + terminal auto-close wait for.
+    if (path.basename(p) === '.setup-intake.json') broadcast({ type: 'setup-done' });
+    trigger(p);
+  });
   watcher.on('error', (e) => console.error('  ! watcher error:', e.message));
   return watcher;
 }

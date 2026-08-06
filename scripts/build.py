@@ -9,7 +9,7 @@ build.py — turn Claude-authored digests into a browsable static site.
   docs/catalogue.json        the index, also written standalone
   docs/papers/<id>/index.html   the report, focus views as tabs
 
-Run:  python build.py
+Run:  python scripts/build.py
 Then open docs/index.html directly, or push docs/ to GitHub Pages.
 """
 
@@ -21,7 +21,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).resolve().parent.parent   # scripts/ -> repo root
 REPORTS = ROOT / "reports"
 COMPARES = ROOT / "compares"
 CHATS = ROOT / "chats"          # compacted /learn discussions (mirrors compares/)
@@ -916,8 +916,12 @@ def finalize_page(page_html, profile, depth=0):
         i = page_html.rfind("</body>")
         tail = credit_html() + block + "\n"
         page_html = page_html[:i] + tail + page_html[i:] if i != -1 else page_html + tail
+    # {{TAGLINE}}: the catalogue's one-line subtitle. Setup stores it as
+    # profile.tagline ("Catalogue tagline"); fall back to the shipped default.
+    tagline = (profile or {}).get("tagline") or "Focused breakdowns of the papers worth keeping."
     return (page_html
             .replace("{{SITE_TITLE}}", html.escape(site_title()))
+            .replace("{{TAGLINE}}", html.escape(tagline))
             .replace("{{ASSET_ROOT}}", "../" * depth))
 
 

@@ -44,4 +44,4 @@ Have a **real back-and-forth** grounded in the paper: answer the reader's questi
 - Be grounded: cite the paper's section/figure/equation numbers; mark anything that went beyond the paper as such. Never invent results.
 
 ## Then build and report back
-Run `python verify.py --build`, fix any `✗` failures, confirm the new chat appears under **Discussions** on `docs/index.html` (and as **"Discussed in"** on the paper's report), and tell the reader to refresh. Mention anything left open.
+Run `python scripts/verify.py --build`, fix any `✗` failures, confirm the new chat appears under **Discussions** on `docs/index.html` (and as **"Discussed in"** on the paper's report), and tell the reader to refresh. Mention anything left open.

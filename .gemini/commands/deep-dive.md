@@ -42,4 +42,4 @@ If `<key>` isn't a section the digest already has, stop and offer to append inst
 - Be grounded: cite the paper's section/equation/theorem numbers; reproduce its notation. If you fill a gap the paper leaves implicit, say so. Never invent steps you can't justify from the paper.
 
 ## Then build and report back
-Run `python verify.py --build`, fix any `✗` failures, confirm the result rendered (the new **Deep dive** tab if you appended, or the updated section if you merged) on `docs/papers/<id>/index.html`, and tell the user to refresh. Mention anything you simplified or were unsure about.
+Run `python scripts/verify.py --build`, fix any `✗` failures, confirm the result rendered (the new **Deep dive** tab if you appended, or the updated section if you merged) on `docs/papers/<id>/index.html`, and tell the user to refresh. Mention anything you simplified or were unsure about.
