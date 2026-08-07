@@ -17,6 +17,23 @@
     "url": "papers/1706.03762/index.html"
   },
   {
+    "id": "1409.0473",
+    "title": "Neural Machine Translation by Jointly Learning to Align and Translate",
+    "authors": "Dzmitry Bahdanau, Kyunghyun Cho, Yoshua Bengio",
+    "year": 2015,
+    "venue": "ICLR 2015",
+    "status": "to-read",
+    "tags": [
+      "deep-learning",
+      "natural-language-processing",
+      "representation-learning"
+    ],
+    "primary_tag": "deep-learning",
+    "bibkey": "bahdanau2015neural",
+    "bibtex": "@inproceedings{DBLP:journals/corr/BahdanauCB14,\n  author       = {Dzmitry Bahdanau and\n                  Kyunghyun Cho and\n                  Yoshua Bengio},\n  editor       = {Yoshua Bengio and\n                  Yann LeCun},\n  title        = {Neural Machine Translation by Jointly Learning to Align and Translate},\n  booktitle    = {3rd International Conference on Learning Representations, {ICLR} 2015,\n                  San Diego, CA, USA, May 7-9, 2015, Conference Track Proceedings},\n  year         = {2015},\n  url          = {http://arxiv.org/abs/1409.0473},\n  biburl       = {https://dblp.org/rec/journals/corr/BahdanauCB14.bib},\n  bibsource    = {dblp computer science bibliography, https://dblp.org}\n}",
+    "url": "papers/1409.0473/index.html"
+  },
+  {
     "id": "hornik1989",
     "title": "Multilayer Feedforward Networks are Universal Approximators",
     "authors": "Kurt Hornik, Maxwell Stinchcombe, Halbert White",

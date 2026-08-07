@@ -35,8 +35,7 @@
   // slug of the discussion being viewed (chat/<slug>/index.html), for "Remove discussion"
   var CHAT_ID = (location.pathname.match(/\/chat\/([^/]+)\//) || [])[1];
   if (REPORT_ID) { try { REPORT_ID = decodeURIComponent(REPORT_ID); } catch (e) {} }
-  var LS_OPEN = 'rr-wm-open';                   // drawer open/closed persists across reloads
-  var LS_H = 'rr-wm-h';                         // drawer height persists
+  var LS_H = 'rr-wm-h';                         // drawer height persists (open/closed deliberately does NOT)
 
   function lsGet(k, d){ try { var v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
@@ -227,6 +226,8 @@
   var activeArm = null;                          // current boot-wait controller (note() on shell output)
   var flowOv = null;                             // the shared full-screen flow overlay
   var setupDoneAt = 0;                           // /setup finished at this time -> reload on the rebuild that follows (TTL'd)
+  var lastPtyData = 0;                           // last time the shared pty produced output (job watchdog)
+  var launchHint = false;                        // a "launching X …" hint is showing (belt: clear on first output)
   var CLR = '\x15';                              // Ctrl+U: clear the input line before (re)typing, so an
                                                  // un-run pre-typed command never accumulates with the next
   var reconnectTimer = null, reconnectDelay = 1500;
@@ -268,7 +269,14 @@
     };
     ws.onmessage = function (ev){
       var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
-      if (m.type === 'data') { if (term) term.write(m.data); if (activeArm && !activeArm.sent()) activeArm.note(); }
+      if (m.type === 'data') {
+        if (term) term.write(m.data);
+        lastPtyData = Date.now();
+        if (activeArm && !activeArm.sent()) activeArm.note(m.data);
+        // belt-and-braces: the assistant producing output IS the launch happening —
+        // never leave a stale "launching X …" hint on screen past that point
+        if (launchHint && spawned) { launchHint = false; if (hint.textContent.indexOf('launching') === 0) setHint(''); }
+      }
       else if (m.type === 'replay') {            // reattaching to a still-running shell (e.g. after navigating)
         if (term) { term.reset(); term.write(m.data); }  // reset first so a same-page reconnect doesn't double up
         reattached = true;
@@ -293,10 +301,9 @@
       }
       else if (m.type === 'setup-done') {
         // /setup finished (the agent deleted the intake file): close the terminal
-        // drawer as promised by the gears overlay — WITHOUT recording it as the
-        // user's preference (that would kill report-page auto-open forever) —
-        // and tell the account block (which owns that overlay) so it can flip to ✓.
-        closeDrawer(true);
+        // drawer as promised by the gears overlay, and tell the account block
+        // (which owns that overlay) so it can flip to its ✓ state.
+        closeDrawer();
         setupDoneAt = Date.now();
         try { window.dispatchEvent(new CustomEvent('rr-setup-done')); } catch (e) {}
         // Kick one rebuild so a fresh 'changed' arrives deterministically (the agent's
@@ -367,20 +374,16 @@
     drawer.classList.add('rr-open');
     document.body.classList.add('rr-wm-bodyopen');
     launch.classList.add('rr-hidden');
-    lsSet(LS_OPEN, '1');
     wantSpawn = true;
     if (!ws || ws.readyState > 1) connect();
     if (ws && ws.readyState === 1) spawn();
     fitSoon();
     if (term) term.focus();
   }
-  // noPersist: close the drawer without recording "closed" as the user's choice —
-  // for programmatic closes (setup finished), so report pages keep auto-opening it.
-  function closeDrawer(noPersist){
+  function closeDrawer(){
     drawer.classList.remove('rr-open');
     document.body.classList.remove('rr-wm-bodyopen');
     launch.classList.remove('rr-hidden');
-    if (!noPersist) lsSet(LS_OPEN, '0');
     wantSpawn = false;            // don't re-spawn a hidden shell on reconnect while closed
   }
   function toggleDrawer(){ isOpen() ? closeDrawer() : openDrawer(); }
@@ -391,7 +394,7 @@
   // and appends it below the reading list (never a new paper/digest). Sends the "done" signal.
   endChatBtn.addEventListener('click', function (){
     openDrawer();
-    if (spawned && ws && ws.readyState === 1) send({ type: 'data', data: CLR + 'done\r' });
+    if (spawned && ws && ws.readyState === 1) typeCommand('done');   // two-phase: paste-swallowed Enter otherwise
     else pending = ['done\r'];
     endChatBtn.hidden = true;                          // the chat is wrapping up
     setHint('ending chat — the agent will compact it');
@@ -432,7 +435,7 @@
     opts = opts || {};
     if (!opts.headless) openDrawer();
     endChatBtn.hidden = true;                          // a freshly launched agent has no /learn chat yet
-    setHint('launching ' + name + ' …');
+    setHint('launching ' + name + ' …'); launchHint = true;
     pending = [(AI_CMD[name] || name) + '\r'];         // latest action wins; no leftover pre-typed command
     // once the launch line is typed, drop the "launching …" hint (it used to stick
     // around forever on a plain ▾ launch); flows override this with their own step
@@ -486,7 +489,7 @@
   // Setup's Finish: auto-run cmd in the EXISTING shell, WITHOUT opening/raising the
   // drawer. Returns true if it reached a live shell, false if none is running yet.
   window.RR_submitCommand = function (cmd){
-    if (spawned && ws && ws.readyState === 1) { send({ type: 'data', data: cmd + '\r' }); return true; }
+    if (spawned && ws && ws.readyState === 1) { typeCommand(cmd); return true; }   // two-phase submit
     return false;
   };
 
@@ -621,10 +624,15 @@
      path to the reader's own subscription; this is a veneer over it.
      ========================================================================== */
   var AIS = ['claude', 'codex', 'gemini'];
-  // when to send the command after launching the assistant: not before it's had a
-  // moment to boot (MIN), as soon as its startup output goes quiet (QUIET), and no
-  // later than MAX (a hard cap in case an animated spinner never goes quiet).
-  var BOOT_MIN_MS = 2500, BOOT_MAX_MS = 9000, BOOT_QUIET_MS = 900;
+  // When to send the command after launching the assistant. MARKER-BASED, not
+  // quiet-based: after the shell echoes the launch there is a 1–3 s SILENT gap while
+  // the assistant's process loads — a quiet-detector fires right into that gap, the
+  // text+Enters get queued by the tty and delivered to the TUI as ONE read (= a
+  // paste), and the command ends up sitting in the composer unsubmitted. So instead:
+  // wait for the TUI to actually take over (alternate-screen switch ESC[?1049h, or a
+  // real burst of redraw output), let it settle briefly, then type. Hard cap for
+  // non-TUI targets (plain shells in tests).
+  var BOOT_SETTLE_MS = 1800, BOOT_CAP_MS = 20000, BOOT_BURST_BYTES = 1500;
   var statusPromise = null;
   function aiStatus(){ return statusPromise || (statusPromise = fetch('/api/status').then(function (r){ return r.json(); }).catch(function (){ return null; })); }
   var reportsPromise = null;   // catalogued papers, for the pickers (per page load)
@@ -642,37 +650,79 @@
     setTimeout(function (){ clearInterval(iv); }, 8000);
   }
 
-  // Send a command once the assistant has booted (adaptive: fires when startup output
-  // goes quiet after a floor, or at a hard cap). Returns a controller: note() on each
-  // shell output chunk, sent() to check, cancel() to abort. `activeArm` points at the
-  // live one so the ws 'data' handler can feed it.
+  // Type a command into the assistant's composer and SUBMIT it reliably. Sending
+  // "text + Enter" in one chunk gets treated as a PASTE by the TUIs — the command
+  // lands in the input box but the trailing Enter is swallowed, so it just sits
+  // there unsubmitted. Send the text first, then Enter separately (and once more
+  // as insurance — Enter on an empty composer is a no-op).
+  function typeCommand(cmd){
+    send({ type: 'data', data: CLR + cmd });
+    setTimeout(function (){ send({ type: 'data', data: '\r' }); }, 400);
+    setTimeout(function (){ send({ type: 'data', data: '\r' }); }, 1300);
+  }
+  // Send a command once the assistant's TUI is actually LIVE (see the constants
+  // above for why quiet-detection is wrong here). Returns a controller: note(chunk)
+  // on each pty output chunk, sent() to check, cancel() to abort. `activeArm`
+  // points at the live one so the ws 'data' handler can feed it.
   function armSend(cmd, onSent){
-    var t0 = Date.now(), lastData = 0, done = false, iv;
+    var t0 = Date.now(), tuiAt = 0, bytes = 0, done = false, iv;
     iv = setInterval(function (){
       if (done){ clearInterval(iv); return; }
-      var now = Date.now(), elapsed = now - t0, quiet = lastData ? now - lastData : 0;
-      if (elapsed >= BOOT_MAX_MS || (elapsed >= BOOT_MIN_MS && lastData && quiet >= BOOT_QUIET_MS)){
+      var now = Date.now();
+      if ((tuiAt && now - tuiAt >= BOOT_SETTLE_MS) || now - t0 >= BOOT_CAP_MS){
         done = true; clearInterval(iv);
-        send({ type: 'data', data: CLR + cmd + '\r' });
+        typeCommand(cmd);
         if (onSent) onSent();
       }
-    }, 250);
-    return { note: function (){ lastData = Date.now(); }, sent: function (){ return done; }, cancel: function (){ done = true; clearInterval(iv); } };
+    }, 200);
+    return {
+      note: function (chunk){
+        if (done || tuiAt) return;
+        bytes += (chunk || '').length;
+        // the TUI taking over the screen is the readiness signal: alternate-screen
+        // switch, or a redraw burst far bigger than a shell echo
+        if ((chunk && chunk.indexOf('\x1b[?1049h') !== -1) || bytes >= BOOT_BURST_BYTES) tuiAt = Date.now();
+      },
+      sent: function (){ return done; },
+      cancel: function (){ done = true; clearInterval(iv); },
+    };
   }
 
   /* ---- job runner: launch → arm → watch a broadcast → verify → done ---- */
   // spec: { ai, title, cmd, working, building, watch(msg)->id|null, verify(id)->truthy|url,
   //         openUrl(id), openLabel, doneText(id), doneToast(id), again, againLabel }
+  var JOB_QUIET_WARN_MS = 90000;   // pty silent this long mid-job -> the assistant is probably waiting
   function runJob(spec){
-    job = { spec: spec, resultId: null, poll: null };
+    job = { spec: spec, resultId: null, poll: null, sentAt: 0, warned: false, dog: null };
     showFlowRun(spec.title);
     setJobStatus('Starting ' + spec.ai + ' …');
     ensureTerm();
     whenTermReady(function (){
       launchAgent(spec.ai, { headless: true, then: function (){
-        activeArm = armSend(spec.cmd, function (){ setJobStatus(spec.working); });
+        activeArm = armSend(spec.cmd, function (){
+          setJobStatus(spec.working);
+          if (job) { job.sentAt = Date.now(); job.dog = setInterval(jobWatchdog, 5000); }
+        });
       } });
     });
+  }
+  // The whole point of the hidden flows is not watching the terminal — so when the
+  // assistant stops producing output for a long stretch (it asked a question, hit an
+  // error, wants a login), SAY so instead of spinning forever. Purely advisory: the
+  // job keeps running and the warning retracts if output resumes.
+  function jobWatchdog(){
+    if (!job || !job.sentAt || job.resultId) return;
+    var quiet = Date.now() - Math.max(lastPtyData, job.sentAt);
+    if (quiet > JOB_QUIET_WARN_MS && !job.warned) {
+      job.warned = true;
+      setJobStatus('The assistant has been quiet for a while — it may be waiting for you (a question, a login, an error). Open the terminal to check.');
+      if (!(flowOv && flowOv.classList.contains('rr-show'))) {
+        toast('The assistant may need your attention', 'Show terminal', function (){ openDrawer(); });
+      }
+    } else if (quiet <= JOB_QUIET_WARN_MS && job.warned) {
+      job.warned = false;
+      setJobStatus(job.spec.working);          // output resumed — all good again
+    }
   }
   // a completion broadcast arrived; if it's ours, poll until the artifact verifies, then finish
   function jobOnBroadcast(m){
@@ -694,6 +744,7 @@
   function jobDone(id, url){
     var sp = job ? job.spec : null;
     if (job && job.poll) clearInterval(job.poll);
+    if (job && job.dog) clearInterval(job.dog);
     if (activeArm){ activeArm.cancel(); activeArm = null; }
     job = null;
     if (!sp) return;
@@ -703,6 +754,7 @@
   function jobOnExit(){
     if (!job) return;
     if (job.poll) clearInterval(job.poll);
+    if (job.dog) clearInterval(job.dog);
     job = null;
     setJobStatus('The assistant session ended before finishing. Open the terminal to see what happened, then try again.');
   }
@@ -840,8 +892,9 @@
   function openAnalyze(){ openFlow('Analyze a paper', renderAnalyzeForm); }
   function renderAnalyzeForm(card){
     heads(card, 'Analyze a paper', 'Add a paper to your library — I read it and write the report for you.');
-    labelInto(card, 'Paper');
-    var input = el('input', 'rr-analyze-input'); input.type = 'text'; input.autocomplete = 'off'; input.spellcheck = false;
+    labelInto(card, 'Paper').setAttribute('for', 'rr-analyze-input');
+    var input = el('input', 'rr-analyze-input'); input.id = 'rr-analyze-input';   // id: label pairing + stable hook
+    input.type = 'text'; input.autocomplete = 'off'; input.spellcheck = false;
     input.placeholder = 'arXiv ID, URL, or path to a PDF   (e.g. 1706.03762)'; card.appendChild(input);
     card.appendChild(el('div', 'rr-analyze-help', 'An arXiv id or URL, a direct PDF link, or a local PDF path. You can add flags, e.g. <code>2010.11929 --depth deep</code>.'));
     var getAi = aiSelectorInto(card);
@@ -1009,8 +1062,8 @@
 
   /* ------------------------------------------------------------- kick off */
   connect();                                     // always connect for the reload channel
-  // restore drawer state; on a paper report open the terminal by default so it's ready to
-  // discuss / deep-dive the paper — unless the reader explicitly closed it before.
-  var openState = lsGet(LS_OPEN, '');
-  if (REPORT_ID ? openState !== '0' : openState === '1') openDrawer();
+  // The terminal drawer NEVER opens itself — not on page load, not on navigation.
+  // It appears only on an explicit action (Terminal button, starting a Discussion,
+  // a "Show terminal" escape hatch, End chat). App-first: the terminal is a tool
+  // of last resort, and a drawer that reappears on every page change reads as a bug.
 })();
