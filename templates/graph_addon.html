@@ -9,7 +9,8 @@
   (analyzed) paper nodes are not touched — they still open their report.
 
   Each ghost offers three actions:
-    • Analyze  — in work mode (server present), run /explain-paper in the
+    • Analyze  — in work mode, open the Analyze overlay with the id prefilled
+                 (RR_openAnalyze; falls back to pre-typing /explain-paper in the
                  integrated terminal; otherwise copy the command + link arXiv.
     • Dismiss  — in work mode, persist to dismissed.json (server) + rebuild;
                  otherwise hide it in this browser (localStorage) + show how to
@@ -221,8 +222,13 @@
   /* ---- the three actions ---- */
   function doAnalyze(d){
     var cmd = '/explain-paper ' + d.id;
+    if (window.RR_WORKMODE && typeof window.RR_openAnalyze === 'function'){
+      window.RR_openAnalyze(d.id);               // the Analyze overlay, id already in the bar — no terminal
+      closePop();
+      return;
+    }
     if (window.RR_WORKMODE && typeof window.RR_runInTerminal === 'function'){
-      window.RR_runInTerminal(cmd);              // Phase 4: into the integrated terminal
+      window.RR_runInTerminal(cmd);              // older client without the flow overlays
       closePop();
       return;
     }

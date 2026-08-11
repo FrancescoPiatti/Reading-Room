@@ -484,6 +484,10 @@
 
   /* ------------------------------------------- hooks the graph add-on calls */
   window.RR_runInTerminal = function (cmd){ preType(cmd); };
+  // GUI flows, openable from anywhere with a prefill (the graph's ghost "Analyze"
+  // opens the Analyze overlay with the arXiv id already in the bar — never the terminal)
+  window.RR_openAnalyze = function (input){ openAnalyze(input); };
+  window.RR_openDiscuss = function (id){ openDiscuss(id); };
   window.RR_launchAgent = function (name){ launchAgent(name); };   // Setup's "Launch claude/codex/gemini"
   window.RR_openTerminal = function (){ openDrawer(); };           // Setup busy-box "Show terminal"
   // Setup's Finish: auto-run cmd in the EXISTING shell, WITHOUT opening/raising the
@@ -889,7 +893,11 @@
   }
 
   /* ---- Analyze: /explain-paper <input> --approve → new report ---- */
-  function openAnalyze(){ openFlow('Analyze a paper', renderAnalyzeForm); }
+  var analyzePrefill = '';                       // set by RR_openAnalyze (graph ghost nodes etc.)
+  function openAnalyze(prefill){
+    analyzePrefill = clean1(prefill || '');
+    openFlow('Analyze a paper', renderAnalyzeForm);
+  }
   function renderAnalyzeForm(card){
     heads(card, 'Analyze a paper', 'Add a paper to your library — I read it and write the report for you.');
     labelInto(card, 'Paper').setAttribute('for', 'rr-analyze-input');
@@ -904,6 +912,7 @@
     input.addEventListener('input', refresh);
     input.addEventListener('keydown', function (e){ if (e.key === 'Enter' && input.value.trim()){ e.preventDefault(); go.click(); } });
     go.addEventListener('click', function (){ if (input.value.trim()) startAnalyze(input.value, getAi()); });
+    if (analyzePrefill){ input.value = analyzePrefill; analyzePrefill = ''; refresh(); }   // e.g. a ghost node's id
     setTimeout(function (){ input.focus(); }, 40);
   }
   function startAnalyze(input, ai){
@@ -916,7 +925,7 @@
       verify: function (id){ return headOk('/papers/' + encodeURIComponent(id) + '/index.html'); },
       openUrl: function (id){ return '/papers/' + encodeURIComponent(id) + '/'; }, openLabel: 'Open report',
       doneText: function (id){ return 'Added ' + id + ' to your library.'; }, doneToast: function (id){ return 'Report ready — ' + id; },
-      again: openAnalyze, againLabel: 'Analyze another',
+      again: function (){ openAnalyze(); }, againLabel: 'Analyze another',   // wrapped: a raw handler would pass the click event as prefill
     });
   }
 
@@ -1018,11 +1027,16 @@
   }
 
   /* ---- Discuss: /learn <id> [topic] --approve → VISIBLE terminal (a conversation) ---- */
-  function openDiscuss(){ openFlow('Discuss a paper', renderDiscussForm); }
+  var discussPrefill = '';                       // set by RR_openDiscuss (graph / report shortcuts)
+  function openDiscuss(prefillId){
+    discussPrefill = clean1(prefillId || '');
+    openFlow('Discuss a paper', renderDiscussForm);
+  }
   function renderDiscussForm(card){
     heads(card, 'Discuss a paper', 'Have a live back-and-forth about a paper. It opens in the terminal; when you’re done, hit End chat to save it as a Discussion.');
     labelInto(card, 'Paper');
-    var getPaper = paperSelectInto(card, { preselect: REPORT_ID || '' });
+    var getPaper = paperSelectInto(card, { preselect: discussPrefill || REPORT_ID || '' });
+    discussPrefill = '';
     labelInto(card, 'Opening question (optional)');
     var topic = el('input', 'rr-analyze-input'); topic.type = 'text'; topic.autocomplete = 'off';
     topic.placeholder = 'where to start — e.g. why does this beat RNNs on long sequences?'; card.appendChild(topic);

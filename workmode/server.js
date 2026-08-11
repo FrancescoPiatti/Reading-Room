@@ -76,10 +76,6 @@ const REPO = path.resolve(__dirname, '..');
   const add = extras.filter((d) => d && !cur.includes(d) && fs.existsSync(d));
   if (add.length) process.env.PATH = cur.concat(add).join(path.delimiter);
 })();
-// A stable id for THIS clone, so the client can scope per-copy browser state (e.g. the
-// first-run tutorial flag) even under work mode — where every clone is served from the
-// same loopback origin at path "/", so a path-based key can't tell two clones apart.
-const REPO_KEY = crypto.createHash('sha1').update(REPO).digest('hex').slice(0, 12);
 const DOCS = path.join(REPO, 'docs');
 const REPORTS = path.join(REPO, 'reports');
 const COMPARES = path.join(REPO, 'compares');
@@ -103,6 +99,23 @@ function userWritePath(name) {
   return fs.existsSync(USER_DIR) ? path.join(USER_DIR, name) : path.join(REPO, name);
 }
 const DISMISSED = userPath('dismissed.json');
+
+// A stable id for THIS INSTALLATION, so the client can scope per-copy browser state
+// (the first-run tutorial flag) even under work mode — where every copy is served
+// from the same loopback origin at path "/". It must identify the INSTALL, not the
+// folder: hashing the repo path meant "delete + re-clone into ~/ReadingRoom" kept
+// the old id and the fresh copy never showed the tutorial. So: a random id,
+// persisted in user/ (gitignored — a re-clone starts blank and mints a new one).
+const REPO_KEY = (function () {
+  const f = path.join(USER_DIR, '.install-id');
+  try {
+    const v = fs.readFileSync(f, 'utf8').trim();
+    if (/^[a-f0-9]{8,}$/i.test(v)) return v.slice(0, 12);
+  } catch (e) {}
+  const v = crypto.randomBytes(6).toString('hex');
+  try { fs.mkdirSync(USER_DIR, { recursive: true }); fs.writeFileSync(f, v + '\n'); } catch (e) {}
+  return v;
+})();
 // NOTE: the intake path must be computed PER REQUEST (userWritePath resolves by
 // whether user/ exists, and user/ can be created after the server starts — a fresh
 // clone's launcher or /setup mkdirs it). A module-load constant here once made the

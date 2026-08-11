@@ -954,7 +954,7 @@ body.rr-modal-open { overflow: hidden; }
 
 <script src="assets/vendor/d3.min.js"></script>
 <script>
-const GRAPH = {"nodes": [{"id": "1409.0473", "label": "Neural Machine Translation by Jointly Learning to Align and Translate", "type": "paper", "url": "papers/1409.0473/index.html", "tag": "deep-learning", "indegree": 1, "year": 2015, "authors": "Dzmitry Bahdanau, Kyunghyun Cho, Yoshua Bengio"}, {"id": "1706.03762", "label": "Attention Is All You Need", "type": "paper", "url": "papers/1706.03762/index.html", "tag": "deep-learning", "indegree": 0, "year": 2017, "authors": "Ashish Vaswani et al."}, {"id": "hornik1989", "label": "Multilayer Feedforward Networks are Universal Approximators", "type": "paper", "url": "papers/hornik1989/index.html", "tag": "deep-learning", "indegree": 0, "year": 1989, "authors": "Kurt Hornik, Maxwell Stinchcombe, Halbert White"}, {"id": "1409.3215", "label": "Sequence to Sequence Learning with Neural Networks", "type": "ghost", "url": "https://arxiv.org/abs/1409.3215", "tag": null, "indegree": 2, "cited_by": 2}], "links": [{"source": "1409.0473", "target": "1409.3215"}, {"source": "1706.03762", "target": "1409.0473"}, {"source": "1706.03762", "target": "1409.3215"}], "queue": [{"id": "1409.3215", "title": "Sequence to Sequence Learning with Neural Networks", "cited_by": 2, "in_graph": true}, {"id": "1211.5063", "title": "On the difficulty of training Recurrent Neural Networks", "cited_by": 1, "in_graph": false}, {"id": "1212.5701", "title": "ADADELTA: An Adaptive Learning Rate Method", "cited_by": 1, "in_graph": false}, {"id": "1302.4389", "title": "Maxout Networks", "cited_by": 1, "in_graph": false}, {"id": "1308.0850", "title": "Generating Sequences With Recurrent Neural Networks", "cited_by": 1, "in_graph": false}, {"id": "1312.6026", "title": "How to Construct Deep Recurrent Neural Networks", "cited_by": 1, "in_graph": false}, {"id": "1406.1078", "title": "Learning Phrase Representations using RNN Encoder-Decoder for Statistical Machine Translation", "cited_by": 1, "in_graph": false}, {"id": "1409.1257", "title": "Overcoming the Curse of Sentence Length for Neural Machine Translation using Automatic Segmentation", "cited_by": 1, "in_graph": false}, {"id": "1409.1259", "title": "On the Properties of Neural Machine Translation: Encoder-Decoder Approaches", "cited_by": 1, "in_graph": false}, {"id": "1512.03385", "title": "Deep Residual Learning for Image Recognition", "cited_by": 1, "in_graph": false}, {"id": "1607.06450", "title": "Layer Normalization", "cited_by": 1, "in_graph": false}, {"id": "1609.08144", "title": "Google's Neural Machine Translation System", "cited_by": 1, "in_graph": false}], "tags": ["deep-learning"]};
+const GRAPH = {"nodes": [{"id": "1706.03762", "label": "Attention Is All You Need", "type": "paper", "url": "papers/1706.03762/index.html", "tag": "deep-learning", "indegree": 0, "year": 2017, "authors": "Ashish Vaswani et al."}, {"id": "hornik1989", "label": "Multilayer Feedforward Networks are Universal Approximators", "type": "paper", "url": "papers/hornik1989/index.html", "tag": "deep-learning", "indegree": 0, "year": 1989, "authors": "Kurt Hornik, Maxwell Stinchcombe, Halbert White"}], "links": [], "queue": [{"id": "1409.0473", "title": "Neural Machine Translation by Jointly Learning to Align and Translate", "cited_by": 1, "in_graph": false}, {"id": "1409.3215", "title": "Sequence to Sequence Learning with Neural Networks", "cited_by": 1, "in_graph": false}, {"id": "1512.03385", "title": "Deep Residual Learning for Image Recognition", "cited_by": 1, "in_graph": false}, {"id": "1607.06450", "title": "Layer Normalization", "cited_by": 1, "in_graph": false}, {"id": "1609.08144", "title": "Google's Neural Machine Translation System", "cited_by": 1, "in_graph": false}], "tags": ["deep-learning"]};
 
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function trunc(s, n){ s = String(s||''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
@@ -1154,7 +1154,8 @@ if (GRAPH.queue.length){
   (analyzed) paper nodes are not touched — they still open their report.
 
   Each ghost offers three actions:
-    • Analyze  — in work mode (server present), run /explain-paper in the
+    • Analyze  — in work mode, open the Analyze overlay with the id prefilled
+                 (RR_openAnalyze; falls back to pre-typing /explain-paper in the
                  integrated terminal; otherwise copy the command + link arXiv.
     • Dismiss  — in work mode, persist to dismissed.json (server) + rebuild;
                  otherwise hide it in this browser (localStorage) + show how to
@@ -1366,8 +1367,13 @@ if (GRAPH.queue.length){
   /* ---- the three actions ---- */
   function doAnalyze(d){
     var cmd = '/explain-paper ' + d.id;
+    if (window.RR_WORKMODE && typeof window.RR_openAnalyze === 'function'){
+      window.RR_openAnalyze(d.id);               // the Analyze overlay, id already in the bar — no terminal
+      closePop();
+      return;
+    }
     if (window.RR_WORKMODE && typeof window.RR_runInTerminal === 'function'){
-      window.RR_runInTerminal(cmd);              // Phase 4: into the integrated terminal
+      window.RR_runInTerminal(cmd);              // older client without the flow overlays
       closePop();
       return;
     }

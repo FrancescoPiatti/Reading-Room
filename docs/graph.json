@@ -1,16 +1,6 @@
 {
   "nodes": [
     {
-      "id": "1409.0473",
-      "label": "Neural Machine Translation by Jointly Learning to Align and Translate",
-      "type": "paper",
-      "url": "papers/1409.0473/index.html",
-      "tag": "deep-learning",
-      "indegree": 1,
-      "year": 2015,
-      "authors": "Dzmitry Bahdanau, Kyunghyun Cho, Yoshua Bengio"
-    },
-    {
       "id": "1706.03762",
       "label": "Attention Is All You Need",
       "type": "paper",
@@ -29,83 +19,19 @@
       "indegree": 0,
       "year": 1989,
       "authors": "Kurt Hornik, Maxwell Stinchcombe, Halbert White"
-    },
-    {
-      "id": "1409.3215",
-      "label": "Sequence to Sequence Learning with Neural Networks",
-      "type": "ghost",
-      "url": "https://arxiv.org/abs/1409.3215",
-      "tag": null,
-      "indegree": 2,
-      "cited_by": 2
     }
   ],
-  "links": [
-    {
-      "source": "1409.0473",
-      "target": "1409.3215"
-    },
-    {
-      "source": "1706.03762",
-      "target": "1409.0473"
-    },
-    {
-      "source": "1706.03762",
-      "target": "1409.3215"
-    }
-  ],
+  "links": [],
   "queue": [
+    {
+      "id": "1409.0473",
+      "title": "Neural Machine Translation by Jointly Learning to Align and Translate",
+      "cited_by": 1,
+      "in_graph": false
+    },
     {
       "id": "1409.3215",
       "title": "Sequence to Sequence Learning with Neural Networks",
-      "cited_by": 2,
-      "in_graph": true
-    },
-    {
-      "id": "1211.5063",
-      "title": "On the difficulty of training Recurrent Neural Networks",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1212.5701",
-      "title": "ADADELTA: An Adaptive Learning Rate Method",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1302.4389",
-      "title": "Maxout Networks",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1308.0850",
-      "title": "Generating Sequences With Recurrent Neural Networks",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1312.6026",
-      "title": "How to Construct Deep Recurrent Neural Networks",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1406.1078",
-      "title": "Learning Phrase Representations using RNN Encoder-Decoder for Statistical Machine Translation",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1409.1257",
-      "title": "Overcoming the Curse of Sentence Length for Neural Machine Translation using Automatic Segmentation",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1409.1259",
-      "title": "On the Properties of Neural Machine Translation: Encoder-Decoder Approaches",
       "cited_by": 1,
       "in_graph": false
     },
