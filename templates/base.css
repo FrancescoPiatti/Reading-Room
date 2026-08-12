@@ -768,3 +768,5 @@ body.rr-modal-open { overflow: hidden; }
   object-fit: cover; object-position: top;
   border: 1px solid var(--line); border-radius: 10px; background: var(--bg-raised);
 }
+/* GIF steps show the whole frame — the montage's key moments (busy box, report) are centered, so a top-crop would hide them */
+.rr-tut-shot--gif .rr-tut-img { max-height: 340px; object-fit: contain; object-position: center; }

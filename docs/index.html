@@ -911,6 +911,8 @@ body.rr-modal-open { overflow: hidden; }
   object-fit: cover; object-position: top;
   border: 1px solid var(--line); border-radius: 10px; background: var(--bg-raised);
 }
+/* GIF steps show the whole frame — the montage's key moments (busy box, report) are centered, so a top-crop would hide them */
+.rr-tut-shot--gif .rr-tut-img { max-height: 340px; object-fit: contain; object-position: center; }
 
 </style>
 </head>
@@ -1706,15 +1708,16 @@ render();
 
   /* -------------------------------------------------------------- tutorial */
   // A bigger, stepped walkthrough (same family as Setup). Auto-opens on first launch
-  // and hands off to Setup; re-openable from the avatar menu. Image steps show real
-  // screenshots (assets/shots/,  resolved per page depth by scripts/build.py);
-  // the GIF steps are still placeholders. Step text is authored/trusted (<b>/<code> ok).
+  // and hands off to Setup; re-openable from the avatar menu. Steps show real
+  // screenshots and GIFs (assets/shots/,  resolved per page depth by
+  // scripts/build.py; a .gif in the <img> animates). Step text is authored/trusted (<b>/<code> ok).
   var TUTORIAL = [
     { shot:'image', img:'assets/shots/catalogue.png',
       cap:'The catalogue: your papers as cards, with search and tag filters.',
       title:'Welcome to Reading Room',
       body:'Reading Room turns a paper into a focused, multi-tab breakdown and keeps it in a fast, searchable catalogue you own — generated in your AI coding session, no API.' },
-    { shot:'gif', cap:'Running <code>/explain-paper</code>, approving the outline, then the report builds.',
+    { shot:'gif', img:'assets/shots/analyze.gif',
+      cap:'The one-click Analyze flow — enter a paper, the report builds.',
       title:'Add a paper',
       body:'In your AI assistant (Claude, Codex, or Gemini) run <code>/explain-paper &lt;arxiv-id&gt;</code> (or a PDF path). It reads the paper, proposes a short outline you approve, then writes the report and builds the page — no manual build step.',
       body2:'Tune each report with flags: <code>--depth skim|standard|deep</code>, <code>--audience peer|newcomer</code>, <code>--views summary,math,results</code> to pick sections, <code>--focus "the stability proof"</code> to lean on one thing, and <code>--approve</code> to skip the approval gate.' },
@@ -1731,7 +1734,8 @@ render();
       cap:'The connections graph: papers linked by citation, with ghost suggestions.',
       title:'Follow the connections',
       body:'The graph links your papers by citation and surfaces <b>ghost</b> nodes — important references worth analyzing next.' },
-    { shot:'gif', cap:'The work-mode app: integrated AI terminal, discuss and deep-dive.',
+    { shot:'gif', img:'assets/shots/apptour.gif',
+      cap:'Work mode: an integrated AI terminal and one-click flows.',
       title:'Discuss &amp; go deeper (work mode)',
       body:'Run it as a local desktop app: one-click flows (Analyze &middot; Compare &middot; Discuss &middot; Deep dive) run the assistant for you, with <b>live rebuilds</b> — a new report appears the moment it finishes. The terminal stays out of the way until you want it, and you can read the PDF inside the app.',
       body2:'<b>Discuss</b> a paper conversationally (<code>/learn</code>) and save the chat, add a worked <b>Deep dive</b> — a full proof or derivation (<code>/deep-dive</code>), or put two or three papers side by side (<code>/compare</code>). It runs on your machine only (loopback), and you still approve every step the AI takes.' },
