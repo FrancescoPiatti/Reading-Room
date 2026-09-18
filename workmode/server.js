@@ -243,6 +243,7 @@ let buildCbs = [];
 // at STARTUP would otherwise broadcast into an empty room and the window would
 // open on a stale site with no visible error.
 let lastBuildError = null;
+const BUILD_TIMEOUT_MS = parseInt(process.env.RR_BUILD_TIMEOUT_MS || '300000', 10);   // 5 min
 
 function runBuild(cb) {
   if (cb) buildCbs.push(cb);
@@ -250,10 +251,14 @@ function runBuild(cb) {
   building = true;
   broadcast({ type: 'building' });
   const child = spawn(PY, ['scripts/build.py'], { cwd: REPO });
+  // a build that hangs (a cloud-evicted digest, a stuck python) would otherwise leave
+  // `building` true forever and queue every later notes/restore/update/stop callback
+  const killer = setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) {} err = (err + '\nscripts/build.py did not finish within ' + (BUILD_TIMEOUT_MS / 1000) + ' s and was stopped').slice(-8000); }, BUILD_TIMEOUT_MS);
   let err = '';
   child.stderr.on('data', (d) => { err = (err + d.toString()).slice(-8000); }); // cap as we append
   child.stdout.on('data', () => {}); // drain to avoid backpressure stalls
   const finish = (code, startupErr) => {
+    clearTimeout(killer);
     building = false;
     if (code === 0) {
       console.log('  ✓ rebuilt docs/');
@@ -682,11 +687,13 @@ app.post('/api/backup/import', (req, res) => {
 });
 function importZip(zipPath, mode, res) {
   const args = ['scripts/archive.py', 'import', zipPath];
+  const cleanup = () => { try { fs.rmSync(zipPath, { force: true }); } catch (e) {} };   // the upload copy is disposable (archive.py keeps its own pre-import snapshot)
   if (mode === 'replace') args.push('--replace');
   runProc(PY, args, { timeoutMs: ARCHIVE_TIMEOUT_MS }, (r) => {
     if (r.code !== 0) {
       const msg = r.error || tail(r.stderr || r.stdout) || ('archive.py exited ' + r.code);
       console.error('  ✗ backup import failed:', msg);
+      cleanup();
       return res.status(500).json({ ok: false, error: msg });
     }
     const m = /restored (\d+) file/.exec(r.stdout || '');
@@ -707,6 +714,7 @@ function importZip(zipPath, mode, res) {
             } catch (e) {}
           }
           console.log('  ✓ restored ' + written + ' file(s) from ' + path.relative(REPO, zipPath) + (mode === 'replace' ? ' (replace)' : ' (merged)'));
+          cleanup();
           runBuild((code) => res.json({ ok: true, written, manifest, state, mode, build: code === 0 }));
         });
     });
@@ -895,7 +903,9 @@ app.post('/api/update/apply', async (req, res) => {
       try { fs.rmSync(zipPath, { force: true }); } catch (e) {}
       let result = null;
       try { result = JSON.parse(String(up.stdout || '').trim().split(/\r?\n/).pop()); } catch (e) {}
-      if (up.code !== 0 || !result) return fail('install', up.error || tail(up.stderr || up.stdout) || 'could not apply the archive', { needsAssistant: false });
+      if (up.code !== 0 || !result || result.ok === false) {
+        return fail('install', (result && result.error) || up.error || tail(up.stderr || up.stdout) || 'could not apply the archive', { needsAssistant: false });
+      }
       const to = localVersion();
       console.log('  ✓ updated ' + from + ' → ' + to + ' (' + (result.changed.length + result.added.length) + ' file(s) changed)');
       if (result.installNeeded) {
@@ -975,11 +985,14 @@ app.get('/pdf', async (req, res) => {
   const id = String(req.query.id || '').trim();
   const okNew = /^\d{4}\.\d{4,5}(v\d+)?$/.test(id);
   const okOld = /^[a-z-]+(\.[a-z]{2})?\/\d{7}(v\d+)?$/i.test(id);
-  if (!okNew && !okOld) return res.status(400).send('bad arXiv id');
+  const okSlug = /^[A-Za-z0-9._-]+$/.test(id) && id.indexOf('..') === -1;   // a local-PDF paper (e.g. hornik1989)
+  if (!okNew && !okOld && !okSlug) return res.status(400).send('bad paper id');
 
-  // reuse a locally downloaded copy if present (e.g. fetched by /explain-paper)
+  // a local copy first (downloaded by /explain-paper, or the reader's own PDF for a
+  // paper that isn't on arXiv); only arXiv-shaped ids fall through to the proxy
   const local = path.join(PAPERS, path.basename(id.replace(/\//g, '-')) + '.pdf');
   if (fs.existsSync(local)) { res.type('application/pdf'); return res.sendFile(local); }
+  if (!okNew && !okOld) return res.status(404).send('No PDF on disk for this paper (expected papers/' + path.basename(id) + '.pdf).');
 
   try {
     const up = await fetch('https://arxiv.org/pdf/' + id, { headers: { 'User-Agent': 'ReadingRoom/1.0 (local app)' } });
@@ -1472,7 +1485,9 @@ function startWatcher() {
 function openUrl(url) {
   try {
     if (process.platform === 'darwin') spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
-    else if (process.platform === 'win32') spawn('cmd', ['/c', 'start', '""', url], { stdio: 'ignore', detached: true }).unref();
+    // Windows: rundll32 takes the URL as a discrete argument — `cmd /c start` would
+    // let `&`, `|` or `%VAR%` inside a link cut the URL and run the remainder
+    else if (process.platform === 'win32') spawn('rundll32', ['url.dll,FileProtocolHandler', url], { stdio: 'ignore', detached: true }).unref();
     else spawn('xdg-open', [url], { stdio: 'ignore', detached: true }).unref();
   } catch (e) { console.log('  ! could not open', url); }
 }

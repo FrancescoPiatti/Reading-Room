@@ -215,6 +215,10 @@ while :; do
   # say why instead of failing silently.
   sleep 3
   if ! kill -0 "$SRV" 2>/dev/null; then
+    # an exit 75 this early is still a "restart me" (an update applied right after
+    # launch), not a failed start
+    wait "$SRV"; RC=$?
+    if [ "$RC" -eq 75 ]; then RESTARTED=1; notify "Update installed — restarting…"; continue; fi
     ERR="$(tail -n 3 "$LOG" 2>/dev/null | tr '"\\' "' ")"
     rm -f "$PIDFILE"
     # Died without writing a single log line = blocked by macOS file permissions

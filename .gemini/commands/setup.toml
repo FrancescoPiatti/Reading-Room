@@ -1,8 +1,6 @@
----
-description: Set up (or update) your Reading Room profile and field config so reports are tailored to your discipline. Replaces /profile.
-argument-hint: "[free text, e.g. \"bio PhD; deep methods; audience peer\"] [--review-profile]   (or run it after Setup in the app)"
----
-
+# Generated from setup.md by scripts/gen_gemini_commands.py — edit the .md, then re-run it.
+description = "Set up (or update) your Reading Room profile and field config so reports are tailored to your discipline. Replaces /profile."
+prompt = '''
 You are running the reader's **setup**: capture their profile + discipline and write `user/profile.json` and `user/config.json`, so the commands — which read these at runtime — tailor every report to the right field and level. Work **interactively**; do **not** use any external API or CLI commands directly. Everything you write goes under `user/` (gitignored, so app updates never overwrite it); fall back to the repo root only on an un-migrated repo, and create `user/` if it doesn't exist.
 
 ## 0. `--review-profile` — reconcile the config with the reader's full profile
@@ -15,7 +13,7 @@ The app's profile editor (avatar menu → Profile → **Edit full profile** → 
 ## 1. Get the intended profile + field
 Two entry points:
 - **In-app Setup questionnaire** — if `user/.setup-intake.json` exists (the in-app Setup posts answers there; older builds used repo-root `.setup-intake.json`), read it as the proposed profile. It may include a `fields` array (the discipline(s) picked) and/or a `tags` array (only present when the reader edited the vocabulary in the questionnaire). **Delete it once applied or abandoned**, so it isn't reused stale. Routing: the profile fields go to `user/profile.json` (§2); `fields`/`tags` go to `user/config.json` (§3).
-- **Terminal** — otherwise use `$ARGUMENTS` and ask a short, **batched** set of questions for whatever's missing: **name**, **role**, **affiliation** (optional), **field(s)** (which `templates/fields/*.json` pack(s) — e.g. `ml`, `bio`, `econ-finance`), **expertise**, **interests** (optional), **defaults** (`depth` = `skim|standard|deep`, `audience` = `peer|newcomer`, `views` = subset of section keys), optional **tagline**.
+- **Terminal** — otherwise use `{{args}}` and ask a short, **batched** set of questions for whatever's missing: **name**, **role**, **affiliation** (optional), **field(s)** (which `templates/fields/*.json` pack(s) — e.g. `ml`, `bio`, `econ-finance`), **expertise**, **interests** (optional), **defaults** (`depth` = `skim|standard|deep`, `audience` = `peer|newcomer`, `views` = subset of section keys), optional **tagline**.
 
 **Keep the reader's involvement minimal.** Setup should *apply* the customization directly — do **not** ask them to approve each change. The only thing they see is a short **final review** (§5) of how their setup looks. (In-app Setup already collected their answers; re-asking for approval defeats the point.)
 
@@ -75,3 +73,4 @@ Only if the field config genuinely can't express something: make the **smallest 
 
 ## 5. Clean up, build, and show ONE final review
 Delete the intake file if it was used. Run `python scripts/verify.py --build` and fix any `✗` failures. Then show a **single, concise review** of the result (the reader's only touchpoint): the resulting profile (name/role/field/defaults), the full profile's path (`user/profile.md` — seeded now, or left as it was — editable from the app's avatar menu → Profile → "Edit full profile", or in the terminal), the active tag vocabulary + focus views their reports will use, and — if you had to touch a command file at all — a one-line note of what and why. Close by telling them they can re-run `/setup` any time to adjust. Offer to remember the profile for future sessions if useful.
+'''

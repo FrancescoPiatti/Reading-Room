@@ -10,6 +10,11 @@ repository's branch archive from GitHub and hands it here. This script:
      backups/ and workmode/node_modules/ are skipped entirely,
   4. prints a JSON summary: which files changed, whether workmode/ (a restart)
      or workmode/package*.json (an npm install) or UPGRADING.md changed.
+  docs/ is skipped too: the app rebuilds it right after the overlay, and an archive's
+  copy could resurrect pages of papers the reader removed.
+  The overlay is STAGED: every file is written to a temp folder first, then moved into
+  place with VERSION last — so an interrupted update never leaves a copy that claims
+  the new version with old code (it would be re-offered instead).
 
 Pure stdlib. Safe against zip-slip (absolute / .. entries, symlinks are skipped).
 
@@ -18,14 +23,16 @@ Usage:
 """
 import argparse
 import json
+import os
 import posixpath
+import shutil
 import sys
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 # the reader's data + local runtime state: never written by an update
-PROTECTED_TOPS = {"reports", "compares", "chats", "user", "papers", "backups", ".git"}
+PROTECTED_TOPS = {"reports", "compares", "chats", "user", "papers", "backups", ".git", "docs"}
 PROTECTED_PREFIXES = ("workmode/node_modules/",)
 PROTECTED_FILES = {"workmode/workmode.log", "workmode/workmode.pid", "workmode/install.log",
                    ".setup-intake.json", "profile.json", "config.json", "dismissed.json"}
@@ -48,50 +55,65 @@ def _members(zf):
         rel = posixpath.normpath(name[len(prefix):])
         if rel.startswith("/") or rel == ".." or rel.startswith("../") or "/../" in rel or rel == ".":
             continue
-        top = rel.split("/", 1)[0]
-        if top in PROTECTED_TOPS or rel in PROTECTED_FILES or rel.startswith(PROTECTED_PREFIXES):
+        top = rel.split("/", 1)[0].lower()
+        low = rel.lower()
+        if (top in PROTECTED_TOPS or low in PROTECTED_FILES
+                or low.startswith(tuple(p.lower() for p in PROTECTED_PREFIXES))):
             continue
         yield info, rel
 
 
 def apply(zip_path: Path, root: Path, dry_run: bool = False) -> dict:
     changed, added, unchanged = [], [], 0
-    with zipfile.ZipFile(zip_path) as zf:
-        members = list(_members(zf))
-        if not members:
-            raise SystemExit("  ✗ the archive holds no app files (not a Reading Room release zip?)")
-        rels = {rel for _, rel in members}
-        if "scripts/build.py" not in rels or "VERSION" not in rels:
-            raise SystemExit("  ✗ the archive doesn't look like a Reading Room release (scripts/build.py / VERSION missing)")
-        for info, rel in members:
-            dest = root / rel
-            data = zf.read(info)
-            if dest.exists():
-                try:
-                    same = dest.read_bytes() == data
-                except OSError:
-                    same = False
-                if same:
-                    unchanged += 1
+    stage = root / f".rr-update-{os.getpid()}"
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            if zf.testzip() is not None:
+                raise SystemExit("  ✗ the downloaded archive is corrupt (bad CRC) — try the update again")
+            members = list(_members(zf))
+            if not members:
+                raise SystemExit("  ✗ the archive holds no app files (not a Reading Room release zip?)")
+            rels = {rel for _, rel in members}
+            if "scripts/build.py" not in rels or "VERSION" not in rels:
+                raise SystemExit("  ✗ the archive doesn't look like a Reading Room release (scripts/build.py / VERSION missing)")
+            plan = []   # (rel, staged path, mode) for every file that differs
+            for info, rel in members:
+                dest = root / rel
+                data = zf.read(info)
+                if dest.exists():
+                    try:
+                        same = dest.read_bytes() == data
+                    except OSError:
+                        same = False
+                    if same:
+                        unchanged += 1
+                        continue
+                    changed.append(rel)
+                else:
+                    added.append(rel)
+                if dry_run:
                     continue
-                changed.append(rel)
-            else:
-                added.append(rel)
-            if dry_run:
-                continue
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            tmp = dest.with_name(dest.name + ".rr-new")
-            tmp.write_bytes(data)
-            # keep executable bits from the archive (launcher scripts) — zip stores them in external_attr
-            mode = (info.external_attr >> 16) & 0o777
-            if mode:
-                try:
-                    tmp.chmod(mode | 0o600)
-                except OSError:
-                    pass
-            tmp.replace(dest)
+                tmp = stage / rel
+                tmp.parent.mkdir(parents=True, exist_ok=True)
+                tmp.write_bytes(data)
+                plan.append((rel, tmp, (info.external_attr >> 16) & 0o777))
+        if not dry_run:
+            # everything is staged: now move into place, VERSION last (the commit point)
+            plan.sort(key=lambda t: t[0] == "VERSION")
+            for rel, tmp, mode in plan:
+                dest = root / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if mode:
+                    try:
+                        tmp.chmod(mode | 0o600)   # keep executable bits (launcher scripts)
+                    except OSError:
+                        pass
+                tmp.replace(dest)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
     touched = changed + added
     return {
+        "ok": True,
         "changed": changed,
         "added": added,
         "unchanged": unchanged,
@@ -111,7 +133,14 @@ def main():
     zp = Path(args.zip)
     if not zp.exists():
         raise SystemExit(f"  ✗ no such file: {zp}")
-    result = apply(zp, Path(args.root).resolve(), args.dry_run)
+    try:
+        result = apply(zp, Path(args.root).resolve(), args.dry_run)
+    except SystemExit as e:                     # our own clear messages
+        print(json.dumps({"ok": False, "error": str(e).strip()}))
+        return 1
+    except (zipfile.BadZipFile, OSError) as e:  # not a zip (an HTML error page?), a locked file, …
+        print(json.dumps({"ok": False, "error": f"could not apply the update: {e}"}))
+        return 1
     print(json.dumps(result))
     return 0
 

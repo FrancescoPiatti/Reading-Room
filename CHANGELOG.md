@@ -2,7 +2,36 @@
 
 All notable changes to Reading Room, newest first. `VERSION` at the repo root
 names the current release; the app's update checker (avatar menu → **Updates**)
-looks for new commits on your clone's git remote and installs them in one click.
+looks for a newer version — new commits on a clone's git remote, or a newer
+published release for a ZIP copy — and installs it in one click.
+
+## 1.2.1 — 2026-09-19
+
+- **Codex and Gemini flows actually run.** Codex rejects unknown `/commands`
+  before the model sees them, so the app now invokes its shipped skills as
+  `$explain-paper …` etc.; Gemini CLI only loads `.gemini/commands/*.toml`, which
+  are now generated from the Markdown sources (`scripts/gen_gemini_commands.py`,
+  checked by `verify.py`). Codex is launched with its startup update prompt off.
+- **First launch of an assistant is visible.** The first time the app launches
+  claude / codex / gemini on an install, the terminal is shown and the flow waits
+  for **Continue**, so a "trust this folder?" or login dialog never swallows the
+  command.
+- **Reports can't run scripts.** Authored HTML (sections, deep dives, comparison
+  cells, discussions — including restored backups) is sanitized at build time and
+  `verify.py` fails on active content; the built pages share the app's origin.
+- **View PDF** works for papers that aren't on arXiv (a local `papers/<id>.pdf`).
+- ZIP updates are staged and atomic (VERSION written last, clean error messages,
+  docs/ and mis-cased data folders never overwritten); orphan pages under `docs/`
+  are pruned on every build; a restore no longer keeps the uploaded zip.
+- Stop no longer claims "nothing was added" once a report has landed; a run
+  adopted from another page doesn't cry wolf; restarting waits for a running
+  assistant to be stopped and rolled back; a ZIP copy that is current reads "up
+  to date"; a git clone's "Skip this version" no longer silences later commits;
+  Setup's Finish only auto-runs into a live assistant; Windows opens links
+  without going through cmd.exe; builds get a 5-minute timeout.
+- **Launcher fix (macOS).** An in-app update applied within seconds of launching
+  made the .app treat the server's "restart me" exit as a failed start; the
+  relaunch loop now handles an early exit 75 too.
 
 ## 1.2.0 — 2026-09-18
 
@@ -15,7 +44,7 @@ looks for new commits on your clone's git remote and installs them in one click.
 - **Assistant settings.** Pick the model and reasoning effort each assistant
   launches with — a gear next to the claude / codex / gemini pills, or
   Terminal ▾ → Assistant settings. Used by every flow button and launch.
-- **Save & review with assistant.** The full-profile editor can hand the
+- **Save & review.** The full-profile editor can hand the
   Markdown to your assistant (`/setup --review-profile`), which brings
   `profile.json` and the field config in line with it.
 - **Back up & restore** modal: the browser-state (JSON) export/import is now its

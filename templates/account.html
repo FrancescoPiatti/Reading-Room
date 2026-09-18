@@ -213,7 +213,8 @@
 (function () {
   var PROFILE  = {{ACCOUNT_PROFILE_JSON}};
   var SECTIONS = {{ACCOUNT_SECTIONS_JSON}};   // [{key,title}] for the "default views" question
-  var FIELDS   = {{ACCOUNT_FIELDS_JSON}};     // {available:[{field,label}], active:[id]} for the field picker
+  var FIELDS   = {{ACCOUNT_FIELDS_JSON}};
+  var SITE_TITLE = {{ACCOUNT_SITE_TITLE_JSON}};   // plain text (escaped once where rendered)     // {available:[{field,label}], active:[id]} for the field picker
   var btn = document.querySelector('.rr-acct-btn');
   var menu = document.getElementById('rr-acct-menu');
   if (!btn || !menu) return;
@@ -564,7 +565,7 @@
     { key:'depth',       label:'Default report depth',             type:'choice', opts:[['skim','Skim'],['standard','Standard'],['deep','Deep']], hint:'How thorough each report is by default. You can override it per paper.' },
     { key:'audience',    label:'Default audience',                 type:'choice', opts:[['peer','Peer — assume expertise'],['newcomer','Newcomer — more scaffolding']], hint:'Peer assumes you know the field; Newcomer adds more background. Override per paper.' },
     { key:'tags',        label:'Tag vocabulary',                   type:'tags', hint:'One per line (broad, kebab-case, 2–4 per paper). Seeded from your field(s) — edit freely. Every paper’s tags must come from this set (the build enforces it).' },
-    { key:'tagline',     label:'Catalogue tagline (optional)',     type:'text', ph:'e.g. Papers I’m keeping, explained.', hint:'Optional — a one-line subtitle under “{{SITE_TITLE}}” on your catalogue.' },
+    { key:'tagline',     label:'Catalogue tagline (optional)',     type:'text', ph:'e.g. Papers I’m keeping, explained.', hint:'Optional — a one-line subtitle under “' + SITE_TITLE + '” on your catalogue.' },
   ];
 
   // seed answers from the current profile
@@ -868,12 +869,12 @@
     { shot:'image', img:'{{ASSET_ROOT}}assets/shots/graph.png',
       cap:'The connections graph: papers linked by citation, with ghost suggestions.',
       title:'Follow the connections',
-      body:'The graph links your papers by citation and surfaces <b>ghost</b> nodes — important references worth reading next. <b>Analyze</b> on a ghost adds it to your library in one click; <b>Dismiss</b> hides the ones you don’t care about.' },
+      body:'The graph links your papers by citation and surfaces <b>ghost</b> nodes — important references worth reading next. <b>Analyze</b> on a ghost opens the Analyze flow with its id already filled in; <b>Dismiss</b> hides the ones you don’t care about.' },
     { shot:'gif', img:'{{ASSET_ROOT}}assets/shots/apptour.gif',
       cap:'Analyze · Compare · Discuss · Deep dive — one click each; the assistant works in the background.',
       title:'Compare, discuss &amp; go deeper',
       body:'The other flows sit right next to Analyze. <b>Compare</b> puts two or three papers side by side — search your library, tick them, and optionally give it a question to organise the comparison around (“which handles long sequences better, and at what cost?”). <b>Discuss</b> opens a conversation about a paper and saves it as a Discussion when you end the chat. <b>Deep dive</b> adds a worked derivation or proof to an existing report.',
-      body2:'Each flow runs the assistant for you; <b>Show terminal</b> reveals it if it ever needs your input, and <b>Stop</b> cancels a flow without touching your library. Everything runs locally on your machine — the assistant is the only part that talks to a cloud service, under your own subscription.' },
+      body2:'Each flow runs the assistant for you; <b>Show terminal</b> reveals it if it ever needs your input, and <b>Stop</b> cancels a flow without touching your library. Everything runs locally on your machine; the only traffic is the assistant’s own (under your subscription), a version check against GitHub on launch, arXiv when you open a PDF, and MathJax’s CDN for equations.' },
     { shot:'image', img:'{{ASSET_ROOT}}assets/shots/setup.png',
       cap:'The Setup questionnaire — field, focus views, and defaults.',
       title:'Make it yours',

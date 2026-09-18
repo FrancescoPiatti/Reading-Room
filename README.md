@@ -5,7 +5,7 @@ A personal reading room for papers. Open the app, click **Analyze paper**, paste
 **It adapts to you.** A short Setup picks your field(s) and seeds a tag vocabulary + the focus-view tabs each report is split into — both editable, in any discipline (ML/maths, bio, econ/finance, engineering, medicine, …). Each paper is then **divided into the topics that fit *that* paper**, anchored on your defaults and pitched to your profile. Summary and Significance are always written; the rest adapts.
 
 ## No API key needed
-Reports are written by **your own AI coding assistant** — [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), Codex CLI, or Gemini CLI — running interactively inside the app, under the subscription you already have. There is **no API key to create, no API billing, no separate account**, and nothing leaves your machine except the assistant's own traffic. The build is plain Python with **no dependencies**.
+Reports are written by **your own AI coding assistant** — [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), Codex CLI, or Gemini CLI — running interactively inside the app, under the subscription you already have. There is **no API key to create, no API billing, no separate account**, and nothing leaves your machine except the assistant's own traffic, a version check against GitHub on launch and every few hours (no library data is sent), arXiv when you open a PDF, and MathJax's CDN for equations. The build is plain Python with **no dependencies**.
 
 ## What it looks like
 
@@ -24,7 +24,7 @@ Reports are written by **your own AI coding assistant** — [Claude Code](https:
    - **macOS** (Terminal): `cd ~ && git clone https://github.com/FrancescoPiatti/Reading-Room.git ReadingRoom && open ReadingRoom`
    - **Windows** (PowerShell): `cd ~; git clone https://github.com/FrancescoPiatti/Reading-Room.git ReadingRoom; explorer ReadingRoom`
 
-   (Forking first, or downloading the ZIP and unzipping to `~/ReadingRoom`, works too — but a clone is what makes in-app updates possible.)
+   (Forking first, or downloading the ZIP and unzipping to `~/ReadingRoom`, works too; both install methods update from the avatar menu — a clone via git, a ZIP via the published archive.)
 4. **Double-click `ReadingRoom.app`** (macOS) or **`ReadingRoom.bat`** (Windows). The app opens with a short tutorial, hands off to **Setup** (your field, focus views, defaults), and offers to add a **Reading Room shortcut** — on your **Desktop** or in your **Applications folder** (Start Menu on Windows). You can decline ("Not now" on macOS, "Cancel" on Windows); to get the offer again, delete `user/.desktop-shortcut-offered` and relaunch.
 
 Two example papers ship in the catalogue (*Attention Is All You Need* and Hornik's universal-approximation theorem) so the first launch isn't empty and you can see finished reports — keep them, or remove them once you've added your own.
@@ -40,7 +40,7 @@ Everything is **one click** in the app — there is no terminal to look at.
 - **Stop** — every running flow has a Stop button. Stopping (from the app, or by quitting the assistant in the terminal) discards the run: nothing half-written is added to your library.
 - **Show terminal** reveals the live session if the assistant asks you something, and the app warns you if it goes quiet mid-run.
 - **Back up** (avatar menu) — a **full backup**: one zip with your reports, notes, comparisons, discussions, settings, optionally the downloaded PDFs, *and* your browser reading state (status, stars, collections). Save it to Downloads, the app's `backups/` folder, or a path you choose. **Restore from zip** brings it all back (merge, or replace everything) — this is how you move to a new machine or a fresh copy.
-- **Profile → Edit full profile** (avatar menu) — a free-form Markdown page about you: background, what you're working on, what you want from reports. Every report, comparison, discussion, and deep dive reads it and calibrates to you. **Save & review with assistant** saves it and has your assistant run `/setup --review-profile`: it reads the Markdown and brings `profile.json` / the field config in line with it (surgically, with a "What changed" review).
+- **Profile → Edit full profile** (avatar menu) — a free-form Markdown page about you: background, what you're working on, what you want from reports. Every report, comparison, discussion, and deep dive reads it and calibrates to you. **Save & review** saves it and has your assistant run `/setup --review-profile`: it reads the Markdown and brings `profile.json` / the field config in line with it (surgically, with a "What changed" review).
 - **Assistant settings** (the gear next to the claude / codex / gemini pills, or Terminal ▾ → Assistant settings) — pick the **model** and **reasoning effort** each assistant launches with (Claude Code `--model`/`--effort`, Codex `-m`/`-c model_reasoning_effort=…`, Gemini `-m`). Blank means the CLI's own default; the choices are remembered in this browser and used by every flow button and Terminal ▾ launch.
 - **Updates** (avatar menu) — the app checks for new versions and offers a **one-click update**, whether you cloned with Git (it fetches your clone's remote and fast-forwards; if it can't, your assistant finishes via `/update`) or downloaded the ZIP (it checks the published version on GitHub, downloads the latest ZIP and replaces the app's own files in place). The "Update available" dialog offers **Later** (until the next launch), **Skip this version** (never for that version — a newer one is still offered) and **Update now**. Your library, notes and settings are never touched; if the app's own server files changed it offers a one-click **Restart now**.
 - **Connections** — hollow **ghost nodes** on the graph (references cited by two or more of your papers but not yet read) become actionable: **Analyze** opens the Analyze flow with the id filled in, **Dismiss** hides one for good.
@@ -86,7 +86,7 @@ Setup writes this for you; every key is optional and hand-editable:
   "site_title": "Reading Room",              // header / page titles / footer
   "fields": ["ml"],                           // shipped packs to merge, from templates/fields/
   "tags": ["deep-learning", "theory"],        // explicit vocabulary — WINS over the packs
-  "max_tags": 4,                              // per-paper tag cap (scripts/verify.py enforces)
+  "max_tags": 4,                              // per-paper soft cap (scripts/verify.py warns above it)
   "sections": [                               // focus-view tabs, in display order
     {"key": "summary", "title": "Summary"}
   ],

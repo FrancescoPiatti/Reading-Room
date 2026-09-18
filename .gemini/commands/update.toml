@@ -1,8 +1,7 @@
----
-description: Bring this Reading Room clone up to date with the latest version — fetch, show what's new, pull safely, run any migration, rebuild — without touching the reader's library.
----
-
-You are updating the **app itself** — the code, templates, scripts, launchers, and commands of this Reading Room clone — to the latest version — from its git remote, or (for a ZIP download) from the published release archive. The reader's data is **never** part of an update: `reports/`, `compares/`, `chats/`, `user/`, and `papers/` are theirs and must survive exactly as they are; `docs/` is generated and can always be rebuilt. Work **interactively**; do **not** use the Anthropic API or `claude -p`. Updates go through the clone's **own git remote and credentials** — never a GitHub/API token, never a zip downloaded over HTTP, never a reinstall.
+# Generated from update.md by scripts/gen_gemini_commands.py — edit the .md, then re-run it.
+description = "Bring this Reading Room clone up to date with the latest version — fetch, show what's new, pull safely, run any migration, rebuild — without touching the reader's library."
+prompt = '''
+You are updating the **app itself** — the code, templates, scripts, launchers, and commands of this Reading Room clone — to the latest version — from its git remote, or (for a ZIP download) from the published release archive. The reader's data is **never** part of an update: `reports/`, `compares/`, `chats/`, `user/`, and `papers/` are theirs and must survive exactly as they are; `docs/` is generated and can always be rebuilt. Work **interactively**; do **not** use any external API or CLI commands directly. Updates go through the clone's **own git remote and credentials** — never a GitHub/API token, never a zip downloaded over HTTP, never a reinstall.
 
 The app's **avatar menu → Updates** normally applies an update by itself (fast-forward pull + rebuild). You run when that automatic path couldn't finish — a pull that isn't a fast-forward, a failed `npm install`, an `UPGRADING.md` that needs a migration — or when the reader types `/update` in the terminal. Either way the goal is the same: finish the update cleanly, with the library intact, and tell the reader to restart the app.
 
@@ -39,3 +38,4 @@ Run `python scripts/verify.py --build` and fix any `✗` failures. If the new ve
 
 ## 6. Report back
 Tell the reader: the version they moved from → to, the highlights, anything you had to resolve or migrate, and that **the app needs a restart to finish** — close the Reading Room window and open it again (`ReadingRoom.app` / `ReadingRoom.bat`; someone running `npm start` in a terminal just reruns it). Their library, notes, and settings are exactly as they were.
+'''

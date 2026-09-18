@@ -18,7 +18,7 @@ The app's **avatar menu → Updates** normally applies an update by itself (fast
 If the repo root has no `.git` folder, this copy was downloaded as a ZIP and there is nothing to pull. Update it the way the app does: check the published version (`https://raw.githubusercontent.com/FrancescoPiatti/Reading-Room/main/VERSION`) against the local `VERSION`; if newer, download `https://github.com/FrancescoPiatti/Reading-Room/archive/refs/heads/main.zip` into `backups/` and run `python scripts/update_zip.py backups/<that>.zip` — it overlays every app file in place and **never writes** `reports/`, `compares/`, `chats/`, `user/`, `papers/`, `backups/` or `workmode/node_modules/` (it prints what changed and whether `workmode/` — a restart — or `workmode/package*.json` — an `npm install` — changed). Then continue at §4. Skip §1–§3.
 
 ## 1. Check the clone and fetch
-- Confirm this is a git checkout with an `origin` remote (`git rev-parse --is-inside-work-tree`, `git remote get-url origin`). If not, stop and explain that this copy wasn't installed with git so it can't self-update: the safe route is `/backup export`, a fresh clone, then `/backup import`.
+- Confirm this is a git checkout with an `origin` remote (`git rev-parse --is-inside-work-tree`, `git remote get-url origin`). If there is no `.git`, this is a ZIP copy — follow §0 above instead.
 - Determine the branch: `git rev-parse --abbrev-ref HEAD`; if detached (`HEAD`), use `main`. Call it `<branch>`; the remote ref is `origin/<branch>`.
 - Run `git fetch --quiet origin` with `GIT_TERMINAL_PROMPT=0` in the environment so a credential prompt fails fast instead of hanging. If the fetch fails (no network, expired credentials, private repo without access), report the error and stop — nothing has changed yet.
 

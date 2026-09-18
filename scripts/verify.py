@@ -201,6 +201,21 @@ def _latex_errors(fragment):
     return out
 
 
+_ACTIVE_RE = [
+    (re.compile(r"<\s*(script|iframe|object|embed|form|link|meta|style|base|template)\b", re.I),
+     "active element (<script>/<iframe>/…) in authored HTML"),
+    (re.compile(r"\son\w+\s*=", re.I), "inline event handler (on…=) in authored HTML"),
+    (re.compile(r"(?:href|src|action)\s*=\s*[\"']?\s*(?:javascript|vbscript|data)\s*:", re.I),
+     "javascript:/data: URL in authored HTML"),
+]
+
+
+def _active_html_errors(frag):
+    """Active content is never allowed: the app serves these pages on the same origin as its
+    terminal socket, so a script in a report would be a shell. build.py strips it; this fails."""
+    return [msg for rx, msg in _ACTIVE_RE if rx.search(frag or "")]
+
+
 def _authored_fragments(name, data):
     """Yield (label, html) for every authored HTML field in a digest/compare/chat."""
     for key, sec in (data.get("sections") or {}).items():
@@ -243,6 +258,9 @@ def check_authored_html(r):
             continue   # already reported by the digest/compare checks
         bad = False
         for label, frag in _authored_fragments(name, data):
+            for e in _active_html_errors(frag):
+                r.fail(f"{label}: {e}")
+                bad = True
             for e in _html_balance_errors(frag):
                 r.fail(f"{label}: {e}")
                 bad = True
@@ -405,6 +423,21 @@ def check_scripts_balanced(r):
         r.ok("every page has balanced <script> tags")
 
 
+def check_gemini_commands(r):
+    """Gemini CLI only loads .gemini/commands/*.toml; they are generated from the .md sources."""
+    r.section("Gemini command files")
+    gen = ROOT / "scripts" / "gen_gemini_commands.py"
+    if not gen.exists():
+        r.warn("scripts/gen_gemini_commands.py missing")
+        return
+    import subprocess
+    p = subprocess.run([sys.executable, str(gen), "--check"], capture_output=True, text=True)
+    if p.returncode == 0:
+        r.ok("every .gemini/commands/*.md has an up-to-date .toml")
+    else:
+        r.fail((p.stdout or p.stderr).strip() or "gen_gemini_commands.py --check failed")
+
+
 def check_cite_and_compares(r):
     r.section("BibTeX & comparisons")
     reports = sorted(DOCS.glob("papers/*/index.html"))
@@ -486,6 +519,7 @@ def main():
     check_embedded_json(r)
     check_scripts_balanced(r)
     check_cite_and_compares(r)
+    check_gemini_commands(r)
     check_contrast(r)
 
     print(f"\n{'='*48}")

@@ -89,6 +89,46 @@ def warn(msg: str) -> None:
     print(f"  ! {msg}", file=sys.stderr)
 
 
+# --- authored-HTML sanitizer -------------------------------------------------
+# Digest sections, deep dives, comparison cells and discussions are HTML written
+# by the assistant (or restored from someone's backup). The app serves the built
+# pages on the same origin as its terminal socket, so a <script> in a report would
+# be a shell on the reader's machine. Strip active content; keep the allowed
+# markup (p/h3/lists/strong/code/pre/a/table/callouts) and LaTeX text untouched.
+_ACTIVE_TAG = re.compile(
+    r"<\s*(script|iframe|object|embed|form|link|meta|style|base|svg|math|template)\b[^>]*>.*?<\s*/\s*\1\s*>"
+    r"|<\s*(script|iframe|object|embed|form|link|meta|style|base|template)\b[^>]*/?>",
+    re.I | re.S)
+_ON_ATTR = re.compile(r"\s+on\w+\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", re.I)
+_BAD_URL = re.compile(r"(\s(?:href|src|action|formaction|xlink:href)\s*=\s*[\"']?)\s*(?:javascript|vbscript|data)\s*:", re.I)
+_SRCDOC = re.compile(r"\s+srcdoc\s*=\s*(\"[^\"]*\"|'[^']*'|[^\s>]+)", re.I)
+
+
+def sanitize_fragment(frag, label=""):
+    """Return the fragment with active content removed; warns when something was stripped."""
+    if not isinstance(frag, str) or "<" not in frag:
+        return frag
+    before = frag
+    frag = _ACTIVE_TAG.sub("", frag)
+    frag = _ON_ATTR.sub("", frag)
+    frag = _SRCDOC.sub("", frag)
+    frag = _BAD_URL.sub(r"\1#blocked:", frag)
+    if frag != before:
+        warn(f"{label}: active HTML (script / event handler / javascript: URL) was stripped")
+    return frag
+
+
+def sanitize_digest(d, label):
+    for key, sec in (d.get("sections") or {}).items():
+        if isinstance(sec, dict) and sec.get("html"):
+            sec["html"] = sanitize_fragment(sec["html"], f"{label} section '{key}'")
+    for i, dd in enumerate(d.get("deepdives") or []):
+        if isinstance(dd, dict) and dd.get("html"):
+            dd["html"] = sanitize_fragment(dd["html"], f"{label} deepdive [{i}]")
+    return d
+
+
+
 def load_digests():
     """Returns (digests, skipped). `skipped` counts papers dropped for bad JSON or
     missing required keys, so the build can exit non-zero rather than silently
@@ -113,7 +153,7 @@ def load_digests():
         # build never clobbers your prose (A1).
         notes = path.parent / "notes.md"
         data["_notes"] = notes.read_text(encoding="utf-8").strip() if notes.exists() else ""
-        digests.append(data)
+        digests.append(sanitize_digest(data, f"digest {path.parent.name}"))
     return digests, skipped
 
 
@@ -511,6 +551,11 @@ def load_compares():
         if not data.get("id") or not data.get("papers"):
             fail(f"{path}: missing id/papers; skipped")
             continue
+        for dim in data.get("dimensions") or []:
+            dim["cells"] = [sanitize_fragment(c, f"compare {path.parent.name} cell") for c in (dim.get("cells") or [])]
+        v = data.get("verdict")
+        if isinstance(v, dict) and v.get("html"):
+            v["html"] = sanitize_fragment(v["html"], f"compare {path.parent.name} verdict")
         out.append(data)
     return out
 
@@ -812,6 +857,7 @@ def load_chats():
         if not data.get("id") or not data.get("papers") or not data.get("html"):
             fail(f"{path}: missing id/papers/html; skipped")
             continue
+        data["html"] = sanitize_fragment(data["html"], f"chat {path.parent.name}")
         out.append(data)
     return out
 
@@ -899,7 +945,8 @@ def account_block(profile):
     return (tmpl.read_text(encoding="utf-8")
             .replace("{{ACCOUNT_PROFILE_JSON}}", prof_json)
             .replace("{{ACCOUNT_SECTIONS_JSON}}", sec_json)
-            .replace("{{ACCOUNT_FIELDS_JSON}}", fld_json))
+            .replace("{{ACCOUNT_FIELDS_JSON}}", fld_json)
+            .replace("{{ACCOUNT_SITE_TITLE_JSON}}", json.dumps(site_title()).replace("</", "<\\/")))
 
 
 # Creator credit shown at the bottom of every page. Attribution is fixed (this is the
@@ -1087,6 +1134,20 @@ def main():
 
     # stop Jekyll on GitHub Pages from eating folders that start with _
     (DOCS / ".nojekyll").write_text("", encoding="utf-8")
+
+    # prune generated pages whose source is gone (a removed paper, a deleted discussion,
+    # a page an update archive put back) — docs/ must mirror reports/compares/chats
+    pruned = 0
+    for sub, src, fname in (("papers", REPORTS, "digest.json"), ("compare", COMPARES, "compare.json"), ("chat", CHATS, "chat.json")):
+        base = DOCS / sub
+        if not base.exists():
+            continue
+        for page in base.iterdir():
+            if page.is_dir() and not (src / page.name / fname).exists():
+                shutil.rmtree(page, ignore_errors=True)
+                pruned += 1
+    if pruned:
+        print(f"  • pruned {pruned} orphan page folder(s) under docs/")
 
     print(f"  ✓ graph: {len(graph['nodes'])} node(s), "
           f"{len(graph['links'])} edge(s), {len(graph['queue'])} queued")
