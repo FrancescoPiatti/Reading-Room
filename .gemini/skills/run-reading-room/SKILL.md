@@ -1,6 +1,6 @@
 ---
 name: run-reading-room
-description: Run, launch, smoke-test, screenshot, or drive the Reading Room app (work-mode server + static site). Use when you need to start the local server, take a screenshot of any page, run a command in the app's integrated terminal, health-check the API/WS guards, or verify a UI change actually renders — without opening a window on the user's screen.
+description: "Run, launch, smoke-test, screenshot, or drive the Reading Room app (its local server + static site). Use when you need to start the local server, take a screenshot of any page, run a command in the app's integrated terminal, health-check the API/WS guards, or verify a UI change actually renders — without opening a window on the user's screen."
 ---
 
 # Run Reading Room
@@ -35,6 +35,11 @@ node .gemini/skills/run-reading-room/driver.mjs stop
   kept in the OS tmpdir; `serve` is idempotent.
 - `shot` also accepts absolute `file://` or `http(s)://` URLs (use `file://`
   for the static-docs behavior of a page). Give MathJax-heavy pages `8000` ms.
+- `shot` emulates a **1200×800 viewport at 2× device scale** (a 2400×1600 PNG —
+  retina-crisp, the size the tutorial/README figures are captured at). Override
+  per run with the env vars `RR_SHOT_W`, `RR_SHOT_H`, `RR_SHOT_SCALE`, e.g.
+  `RR_SHOT_SCALE=1 node … shot / out.png` for a quick 1:1 check, or
+  `RR_SHOT_H=1600` for a tall page (the PNG is always `W×scale` by `H×scale`).
 - `term` uses the real WS protocol with a fresh pty (`respawn`), so it never
   types into a TUI another session left running.
 
@@ -68,7 +73,7 @@ OneDrive eviction) are documented in README → "macOS first-launch notes".
 - **An empty server log does not mean "not started"** — node fully buffers
   stdout to files. Probe the port instead (startup also rebuilds docs/, which
   takes seconds).
-- **`--virtual-time-budget` screenshots hang** on work-mode pages (the open
+- **`--virtual-time-budget` screenshots hang** on the app's pages (the open
   WebSocket never lets virtual time settle) and on MathJax pages. Use the
   driver's CDP path with real waits.
 - **A fresh browser profile auto-opens the tutorial modal** over every page,

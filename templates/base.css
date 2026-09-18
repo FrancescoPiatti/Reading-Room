@@ -435,6 +435,15 @@ mjx-container[display="true"] { margin: 0.6em 0 1.1em; }
   background: var(--bg-raised); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
 }
 .cpill:hover { border-color: var(--accent); color: var(--ink); text-decoration: none; }
+/* the guiding question/topic (`--focus`): a subtle tinted callout under the lead.
+   Tokens only, so light and dark themes are both covered. */
+.c-focus {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px;
+  margin: 18px 0 0; padding: 12px 16px;
+  background: var(--accent-dim); border: 1px solid var(--line); border-radius: 8px;
+  font-size: 15.5px; line-height: 1.55; color: var(--ink);
+}
+.c-focus .k { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
 .ctable-wrap { overflow-x: auto; margin: 8px 0 24px; }
 .ctable { width: 100%; border-collapse: collapse; font-size: 15px; }
 .ctable th, .ctable td {

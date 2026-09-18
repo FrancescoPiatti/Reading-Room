@@ -22,38 +22,7 @@
     }
   ],
   "links": [],
-  "queue": [
-    {
-      "id": "1409.0473",
-      "title": "Neural Machine Translation by Jointly Learning to Align and Translate",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1409.3215",
-      "title": "Sequence to Sequence Learning with Neural Networks",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1512.03385",
-      "title": "Deep Residual Learning for Image Recognition",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1607.06450",
-      "title": "Layer Normalization",
-      "cited_by": 1,
-      "in_graph": false
-    },
-    {
-      "id": "1609.08144",
-      "title": "Google's Neural Machine Translation System",
-      "cited_by": 1,
-      "in_graph": false
-    }
-  ],
+  "queue": [],
   "tags": [
     "deep-learning"
   ]

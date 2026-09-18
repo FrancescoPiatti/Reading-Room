@@ -74,8 +74,11 @@ MAX_TAGS = 4
 
 # An external reference must be cited by at least this many in-library papers
 # before it is drawn as a "ghost" node in the connections graph (docs/graph.html).
-# Refs below the threshold still appear in the reading queue.
 GHOST_MIN = 2
+# ...and by at least this many before it is listed in the reading queue below the
+# graph. A reference cited by a single paper is not yet a signal that it matters
+# to the library as a whole; the queue surfaces only recurring references.
+QUEUE_MIN = 2
 
 
 def fail(msg: str) -> None:
@@ -376,7 +379,8 @@ def build_graph(digests):
     nodes  = analyzed papers + ghost nodes (external refs cited by >= GHOST_MIN
              distinct in-library papers).
     links  = directed A->B for every citation whose target is a node.
-    queue  = every external (not-yet-analyzed) reference cited >= 1 time.
+    queue  = external (not-yet-analyzed) references cited by >= QUEUE_MIN
+             distinct in-library papers (most-cited first).
     """
     library = {norm_id(d["id"]): d for d in digests}
     dismissed = load_dismissed()
@@ -438,7 +442,8 @@ def build_graph(digests):
         "title": ext_title.get(tid, ""),
         "cited_by": len(s),
         "in_graph": len(s) >= GHOST_MIN,
-    } for tid, s in citers.items() if tid not in library and tid not in dismissed]
+    } for tid, s in citers.items()
+        if tid not in library and tid not in dismissed and len(s) >= QUEUE_MIN]
     queue.sort(key=lambda q: (-q["cited_by"], q["id"]))
 
     tags = sorted({n["tag"] for n in nodes if n.get("tag")})
@@ -543,11 +548,19 @@ def render_compare(c, base_css, lib):
         f'<a class="cpill" href="https://arxiv.org/abs/{html.escape(p)}">arXiv:{html.escape(p)}</a>'
         for p in papers)
 
+    # optional guiding question/topic (`/compare … --focus "…"`): a subtle callout
+    # under the lead. Plain text, escaped; empty string when absent.
+    _f = c.get("focus")
+    focus = _f.strip() if isinstance(_f, str) else ""   # non-strings are ignored (verify.py warns)
+    focus_html = (f'<p class="c-focus"><span class="k">Question</span> {html.escape(focus)}</p>'
+                  if focus else "")
+
     tmpl = (TEMPLATES / "compare.html.tmpl").read_text(encoding="utf-8")
     repl = {
         "{{BASE_CSS}}": base_css,
         "{{TITLE_TEXT}}": html.escape(c["title"]),
         "{{LEAD}}": html.escape(c.get("tldr", "")),
+        "{{FOCUS}}": focus_html,
         "{{PILLS}}": chips,
         "{{TABLE}}": table,
         "{{VERDICT}}": verdict,

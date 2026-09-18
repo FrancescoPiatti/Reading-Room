@@ -7,7 +7,7 @@ description: "Go deeper on a paper already in the Reading Room — author a work
 
 ## Invocation
 
-Invoke explicitly as `$deep-dive <id-or-arxiv> <topic, free text> [--into <section-key> | --append] [--depth deep|standard] [--approve]` in Codex or `/deep-dive <id-or-arxiv> <topic, free text> [--into <section-key> | --append] [--depth deep|standard] [--approve]` in Reading Room work mode. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
+Invoke explicitly as `$deep-dive <id-or-arxiv> <topic, free text> [--into <section-key> | --append] [--depth deep|standard] [--approve]` in Codex or `/deep-dive <id-or-arxiv> <topic, free text> [--into <section-key> | --append] [--depth deep|standard] [--approve]` in the Reading Room app. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
 
 
 You are adding an **incremental deep dive** (a full worked derivation, proof walkthrough, or mechanism breakdown) to an existing Reading Room report. This does NOT regenerate the digest — it either **appends** a self-contained entry to the paper's `deepdives` array (its own **Deep dive** tab) **or merges** into a digest section you name, then rebuilds. Work **interactively**; do **not** use an external assistant API or a non-interactive assistant CLI.
@@ -22,6 +22,8 @@ You are adding an **incremental deep dive** (a full worked derivation, proof wal
 
 ## Purpose — how a deep dive differs from the digest
 The digest's lens view (key `math`; see the field config `user/config.json` for the field's framing/title and `config.lens`/`config.tone`) gives the core logic at reference depth. A deep dive goes a level lower on **one** thing the user names — the field's core artifact: every step of a proof or full derivation with the algebra shown (maths), a careful identification argument (econ), an assay/protocol and statistical-validity walkthrough (bio), a concrete worked example, or a mechanism trace. Pitch it to the reader's profile (assume fluency in their expertise) and `config.tone`. Default `--depth deep`.
+
+**Reader's profile.** Read `user/profile.json` (expertise, defaults) and, when it exists, `user/profile.md` — the reader's free-form full profile (background, current projects, what they want from reports, style preferences), seeded by `/setup` and edited by the reader. Use it to decide how much to spell out and which steps deserve the most care (e.g. the parts closest to their own work); it complements `profile.json` and never overrides the flags or the topic they named. If it's absent, carry on without it (don't create it here).
 
 ## Gate — confirm before writing
 Post and **wait for approval**:

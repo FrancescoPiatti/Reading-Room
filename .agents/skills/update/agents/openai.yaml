@@ -1,0 +1,8 @@
+interface:
+  display_name: "Update"
+  short_description: "Update this Reading Room clone safely"
+  default_prompt: "Use $update to bring Reading Room up to date."
+
+policy:
+  allow_implicit_invocation: false
+

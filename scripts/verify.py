@@ -428,6 +428,11 @@ def check_cite_and_compares(r):
                 r.warn(f"compare {c.get('id')}: references non-library paper(s) {unknown}")
             else:
                 r.ok(f"compare {c.get('id')}: all papers in library")
+            # optional `focus` (the --focus question/topic): plain text, rendered escaped
+            focus = c.get("focus")
+            if focus is not None and not isinstance(focus, str):
+                r.warn(f"compare {c.get('id')}: 'focus' should be a plain string "
+                       f"(got {type(focus).__name__}); it is ignored by the build")
 
     if CHATS.exists():
         cids = {p.parent.name for p in REPORTS.glob("*/digest.json")}

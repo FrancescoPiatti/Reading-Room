@@ -2,26 +2,31 @@
 'use strict';
 
 /*
- * Reading Room — work-mode server.
+ * Reading Room — app server.
  *
  * Serves the EXISTING static site (docs/) on loopback only and layers on the
- * "work mode" affordances without touching the static build:
+ * app's affordances without touching the static build:
  *   • static-serves docs/ exactly as built (relative paths -> served unchanged);
- *   • for .html responses, injects (in memory, on the fly) a small work-mode
- *     client — the on-disk docs/ stays byte-identical, so GitHub Pages is never
- *     affected;
+ *   • for .html responses, injects (in memory, on the fly) a small app client —
+ *     the on-disk docs/ stays byte-identical, so GitHub Pages is never affected;
  *   • a WebSocket bridge spawns your $SHELL via node-pty in the repo root for an
  *     integrated terminal (you run an AI — claude / codex / gemini — and
  *     `/explain-paper` yourself; this never bypasses the AI's permission prompts);
  *   • a chokidar watcher on reports/ (+ compares/ + dismissed.json) re-runs the
  *     EXISTING `python scripts/build.py` when a digest changes and pushes a refresh to
  *     the browser (it watches files — it does NOT parse terminal output);
- *   • small local API routes that call the existing build step and persist
- *     ghost dismissals to dismissed.json.
+ *   • small local API routes that call the existing build step, persist ghost
+ *     dismissals to dismissed.json, read/write the reader's notes + full profile,
+ *     run full backups through the EXISTING scripts/archive.py, and update the
+ *     clone with plain git (never the GitHub API);
+ *   • job bookkeeping for the one-click flows: a snapshot at job start, a poll
+ *     that notices the assistant exiting, and a rollback (only ever of things
+ *     that were NOT in the snapshot) when a job is stopped.
  *
  * SECURITY: binds to 127.0.0.1 only. Because it exposes a shell, it must never be
  * reachable from the network. No CORS is enabled; the WS shares the loopback
- * HTTP server.
+ * HTTP server. Every child process is spawned with an argument ARRAY (no shell
+ * strings) and a hard timeout, so a hung tool can never hang a request.
  *
  * This file and everything under workmode/ are purely additive. Removing the
  * workmode/ directory leaves the Python build and the static site untouched.
@@ -41,7 +46,7 @@ try {
   ({ WebSocketServer } = require('ws'));
   chokidar = require('chokidar');
 } catch (e) {
-  console.error('\n  ✗ Work-mode dependencies are not installed.');
+  console.error('\n  ✗ The app\'s Node dependencies are not installed.');
   console.error('    Run:  cd workmode && npm install\n');
   process.exit(1);
 }
@@ -82,6 +87,7 @@ const COMPARES = path.join(REPO, 'compares');
 const CHATS = path.join(REPO, 'chats');
 const PAPERS = path.join(REPO, 'papers');
 const USER_DIR = path.join(REPO, 'user');
+const BACKUPS = path.join(REPO, 'backups');   // archive.py's default zip location (gitignored)
 const CLIENT = path.join(__dirname, 'client');
 const NODE_MODULES = path.join(__dirname, 'node_modules');
 
@@ -101,7 +107,7 @@ function userWritePath(name) {
 const DISMISSED = userPath('dismissed.json');
 
 // A stable id for THIS INSTALLATION, so the client can scope per-copy browser state
-// (the first-run tutorial flag) even under work mode — where every copy is served
+// (the first-run tutorial flag) even under the app — where every copy is served
 // from the same loopback origin at path "/". It must identify the INSTALL, not the
 // folder: hashing the repo path meant "delete + re-clone into ~/ReadingRoom" kept
 // the old id and the fresh copy never showed the tutorial. So: a random id,
@@ -129,11 +135,18 @@ const NO_OPEN = process.argv.includes('--no-open') || process.env.RR_NO_OPEN ===
 // Quit the server a short while after the last app window closes, so closing the
 // app shuts everything down. Opt out with RR_KEEPALIVE=1 (e.g. headless serving).
 const KEEPALIVE = process.env.RR_KEEPALIVE === '1';
+// Set by ReadingRoom.app / run-server.cmd: a launcher loop relaunches us on exit 75.
+// Under a bare `npm start` there is no loop, so the in-app "Restart now" is not offered.
+const RESTARTABLE = process.env.RR_LAUNCHER === '1';
+let restartPending = false;   // an update touched workmode/ and the server has not been restarted yet
 const SHUTDOWN_GRACE_MS = parseInt(process.env.RR_SHUTDOWN_GRACE_MS || '5000', 10);
 
 let ACTUAL_PORT = WANT_PORT; // updated once we actually bind
+// When THIS server process started — /api/status reports it so a page can tell a
+// freshly restarted server (after an update) from the one it was talking to.
+const STARTED_AT = new Date().toISOString();
 
-// Vendored browser assets (served from node_modules so work mode is offline).
+// Vendored browser assets (served from node_modules so the app works offline).
 // Each entry lists candidate paths — the first that exists wins, which keeps us
 // robust to minor packaging differences across xterm versions.
 const VENDOR = {
@@ -181,6 +194,45 @@ function pythonCmd() {
 
 const PY = pythonCmd();
 
+// Run a helper process (python / git / npm / pgrep) to completion with a HARD
+// timeout. Every child the API routes start goes through here: args are always an
+// array (no shell strings), output is capped, and on timeout the child is killed
+// and the callback fires anyway — a hung tool can never hang a request.
+//   cb({ code, stdout, stderr, timedOut, error })   code -1 = failed to run / timed out
+function runProc(cmd, args, opts, cb) {
+  const o = opts || {};
+  const cap = o.cap || 64 * 1024;
+  let child;
+  try {
+    child = spawn(cmd, args, { cwd: o.cwd || REPO, env: o.env || process.env, shell: !!o.shell, windowsHide: true });
+  } catch (e) {
+    return cb({ code: -1, stdout: '', stderr: '', timedOut: false, error: e.message });
+  }
+  let out = '', err = '', done = false, timedOut = false;
+  child.stdout.on('data', (d) => { out = (out + d.toString()).slice(-cap); });
+  child.stderr.on('data', (d) => { err = (err + d.toString()).slice(-cap); });
+  const finish = (code, spawnErr) => {
+    if (done) return;
+    done = true; clearTimeout(timer);
+    cb({ code: spawnErr ? -1 : code, stdout: out, stderr: err, timedOut, error: spawnErr || null });
+  };
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try { child.kill('SIGKILL'); } catch (e) {}
+    finish(-1, 'timed out after ' + Math.round((o.timeoutMs || 60000) / 1000) + ' s');
+  }, o.timeoutMs || 60000);
+  child.on('error', (e) => finish(-1, e.message));
+  child.on('close', (code) => finish(code === null ? -1 : code)); // 'close' = stdio drained
+}
+function runP(cmd, args, opts) { return new Promise((resolve) => runProc(cmd, args, opts, resolve)); }
+// Last N characters of a process's output, for error messages.
+function tail(s, n) { s = String(s || '').trim(); n = n || 600; return s.length > n ? '…' + s.slice(-n) : s; }
+// YYYYMMDD-HHMMSS in local time (matches scripts/archive.py's default file names).
+function stamp() {
+  const d = new Date(), p = (n) => String(n).padStart(2, '0');
+  return '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
+
 // ----------------------------------------------------------------------------
 // Build runner (calls the EXISTING python scripts/build.py — never reimplements it)
 // ----------------------------------------------------------------------------
@@ -222,11 +274,11 @@ function runBuild(cb) {
 }
 
 // ----------------------------------------------------------------------------
-// HTML interception: inject the work-mode client before </body> (in memory)
+// HTML interception: inject the app client before </body> (in memory)
 // ----------------------------------------------------------------------------
 function workmodeSnippet() {
   return [
-    '<!-- Reading Room work mode (injected by the local server; NOT in docs/ on disk) -->',
+    '<!-- Reading Room app client (injected by the local server; NOT in docs/ on disk) -->',
     '<link rel="stylesheet" href="/__workmode/vendor/xterm.css">',
     '<link rel="stylesheet" href="/__workmode/workmode.css">',
     '<script>window.RR_WORKMODE = { ws: "/__workmode/ws", port: ' + ACTUAL_PORT + ', root: "' + REPO_KEY + '" };</script>',
@@ -263,7 +315,10 @@ function resolveHtml(reqPath) {
 // Express app
 // ----------------------------------------------------------------------------
 const app = express();
-app.use(express.json({ limit: '256kb' }));
+// 1 MB: the full-backup export carries the browser's reading state (one small record
+// per paper) and the profile editor a Markdown document — both tiny, but a large
+// library with many collections must never trip the limit.
+app.use(express.json({ limit: '1mb' }));
 
 // --- loopback origin guard (CSRF / drive-by defense) ---
 // The server binds 127.0.0.1, but any web page the user visits can still fire
@@ -284,8 +339,11 @@ function isLoopbackOrigin(origin) {
   } catch (e) { return false; }
 }
 app.use((req, res, next) => {
+  // the Host check applies to EVERY method: a DNS-rebinding page (Host: attacker.tld)
+  // must not be able to read the profile / notes / repo path either
+  if (!isLoopbackHost(req.headers.host)) return res.status(403).json({ ok: false, error: 'forbidden' });
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
-  if (isLoopbackHost(req.headers.host) && isLoopbackOrigin(req.headers.origin)) return next();
+  if (isLoopbackOrigin(req.headers.origin)) return next();
   res.status(403).json({ ok: false, error: 'forbidden' });
 });
 
@@ -298,6 +356,10 @@ app.get('/api/status', (req, res) => {
     terminal: !!pty,
     ais: { claude: !!which('claude'), codex: !!which('codex'), gemini: !!which('gemini') },
     python: PY,
+    startedAt: STARTED_AT,
+    restartable: RESTARTABLE,
+    restartPending,
+    job: activeJob ? { kind: activeJob.kind, id: activeJob.id, startedAt: activeJob.startedAt, token: activeJob.token } : null,
   });
 });
 
@@ -446,6 +508,465 @@ app.post('/api/open', (req, res) => {
   res.json({ ok: true });
 });
 
+// --- full profile (user/profile.md) ---
+// Free-form Markdown the commands read to calibrate reports (alongside profile.json).
+// Read resolves like every other user file (user/ first, legacy root second); a write
+// always lands in user/ (created if missing). No rebuild — nothing in docs/ shows it.
+app.get('/api/profile-md', (req, res) => {
+  let text = '', exists = false;
+  try { text = fs.readFileSync(userPath('profile.md'), 'utf8'); exists = true; } catch (e) {}
+  res.json({ ok: true, text, exists });
+});
+app.post('/api/profile-md', (req, res) => {
+  const text = String((req.body && req.body.text) || '');
+  try {
+    if (text.trim() === '') {
+      const p = userPath('profile.md');
+      if (fs.existsSync(p)) fs.unlinkSync(p);         // an empty save removes the file
+    } else {
+      fs.mkdirSync(USER_DIR, { recursive: true });
+      fs.writeFileSync(path.join(USER_DIR, 'profile.md'), text);
+    }
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+  res.json({ ok: true });
+});
+
+// --- full backup (zip) — a thin wrapper around the EXISTING scripts/archive.py ---
+// The zip holds reports/, compares/, chats/, user/ (+ papers/*.pdf unless excluded).
+// The browser's reading state (stars/status/collections live in localStorage) is
+// written to user/reading-state.json just before zipping so it travels inside.
+function listPdfs() {
+  try { return fs.readdirSync(PAPERS).filter((n) => /\.pdf$/i.test(n)); } catch (e) { return []; }
+}
+function listDirsWith(base, file) {
+  try { return fs.readdirSync(base).filter((n) => fs.existsSync(path.join(base, n, file))); } catch (e) { return []; }
+}
+function countDirsWith(base, file) { return listDirsWith(base, file).length; }
+function backupCounts(includePdfs) {
+  return {
+    reports: countDirsWith(REPORTS, 'digest.json'),
+    comparisons: countDirsWith(COMPARES, 'compare.json'),
+    discussions: countDirsWith(CHATS, 'chat.json'),
+    pdfs: includePdfs === false ? 0 : listPdfs().length,
+  };
+}
+function downloadsDir() {
+  const d = path.join(os.homedir(), 'Downloads');
+  try { return fs.statSync(d).isDirectory() ? d : null; } catch (e) { return null; }
+}
+const exportedZips = new Set();   // only zips THIS process wrote may be revealed in Finder/Explorer
+const ARCHIVE_TIMEOUT_MS = 10 * 60 * 1000;
+
+app.get('/api/backup/info', (req, res) => {
+  res.json({ ok: true, counts: backupCounts(true), downloadsDir: downloadsDir(), backupsDir: BACKUPS });
+});
+
+app.post('/api/backup/export', (req, res) => {
+  const b = (req.body && typeof req.body === 'object') ? req.body : {};
+  const includePdfs = b.pdfs !== false;
+  const dest = typeof b.dest === 'string' ? b.dest : 'downloads';
+  if (['downloads', 'backups', 'custom'].indexOf(dest) === -1) {
+    return res.status(400).json({ ok: false, error: 'dest must be downloads, backups or custom' });
+  }
+  const fname = 'reading-room-backup-' + stamp() + '.zip';
+  let out;
+  if (dest === 'downloads') out = path.join(downloadsDir() || BACKUPS, fname);   // no Downloads folder -> backups/
+  else if (dest === 'backups') out = path.join(BACKUPS, fname);
+  else {
+    const p = String(b.path || '').trim();
+    if (!p || !path.isAbsolute(p)) return res.status(400).json({ ok: false, error: 'the custom destination must be an absolute path' });
+    let target = path.normalize(p);
+    try { if (fs.statSync(target).isDirectory()) target = path.join(target, fname); } catch (e) {}   // a folder -> default name inside it
+    if (!/\.zip$/i.test(target)) return res.status(400).json({ ok: false, error: 'the destination must end in .zip' });
+    let parentOk = false;
+    try { parentOk = fs.statSync(path.dirname(target)).isDirectory(); } catch (e) {}
+    if (!parentOk) return res.status(400).json({ ok: false, error: 'the destination folder does not exist' });
+    if (fs.existsSync(target)) return res.status(400).json({ ok: false, error: 'a file already exists at that path — pick another name' });
+    out = target;
+  }
+  if (b.state && typeof b.state === 'object' && !Array.isArray(b.state)) {
+    // keep only the browser reading-state keys (mirrors account.html's isStateKey) —
+    // never persist arbitrary key/value pairs a page might send
+    const state = {};
+    for (const k of Object.keys(b.state)) {
+      if (/^rr-(status|prio|tags)-/.test(k) || k === 'rr-dismissed' || k === 'rr-theme') state[k] = String(b.state[k]);
+    }
+    const doc = { tool: 'reading-room', kind: 'reading-state', exported: new Date().toISOString().slice(0, 10), state };
+    try {
+      fs.mkdirSync(USER_DIR, { recursive: true });
+      fs.writeFileSync(path.join(USER_DIR, 'reading-state.json'), JSON.stringify(doc, null, 2) + '\n');
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: 'could not save the reading state: ' + e.message });
+    }
+  }
+  const args = ['scripts/archive.py', 'export', '-o', out];
+  if (!includePdfs) args.push('--no-pdfs');
+  runProc(PY, args, { timeoutMs: ARCHIVE_TIMEOUT_MS }, (r) => {
+    if (r.code !== 0) {
+      const msg = r.error || tail(r.stderr || r.stdout) || ('archive.py exited ' + r.code);
+      console.error('  ✗ backup export failed:', msg);
+      return res.status(500).json({ ok: false, error: msg });
+    }
+    let bytes = 0;
+    try { bytes = fs.statSync(out).size; } catch (e) {}
+    exportedZips.add(out);
+    console.log('  ✓ backup written → ' + out);
+    res.json({ ok: true, path: out, counts: backupCounts(includePdfs), includes_pdfs: includePdfs, bytes });
+  });
+});
+
+// Reveal an exported zip in Finder / Explorer. Restricted to paths THIS process
+// exported (never an arbitrary path from the page).
+app.post('/api/backup/reveal', (req, res) => {
+  const p = String((req.body && req.body.path) || '');
+  if (!exportedZips.has(p)) return res.status(400).json({ ok: false, error: 'unknown backup path' });
+  if (!fs.existsSync(p)) return res.status(404).json({ ok: false, error: 'that backup no longer exists' });
+  try {
+    if (process.platform === 'darwin') spawn('open', ['-R', p], { stdio: 'ignore', detached: true }).unref();
+    else if (process.platform === 'win32') spawn('explorer', ['/select,' + p], { stdio: 'ignore', detached: true }).unref();
+    else spawn('xdg-open', [path.dirname(p)], { stdio: 'ignore', detached: true }).unref();
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+  res.json({ ok: true });
+});
+
+// Restore from a zip. The request body is the RAW zip bytes (fetch(..., {body: File})).
+// It's saved to backups/import-<ts>.zip, then archive.py imports it (making its own
+// pre-import safety snapshot first; --replace wipes the covered dirs for an exact
+// restore). If the zip carried user/reading-state.json its "state" comes back so the
+// page can restore the browser's stars/status/collections. Responds AFTER the rebuild.
+const IMPORT_MAX_BYTES = 8 * 1024 * 1024 * 1024;   // a PDF-inclusive library can be large; streamed, never buffered
+app.post('/api/backup/import', (req, res) => {
+  const mode = String(req.query.mode || 'merge');
+  if (mode !== 'merge' && mode !== 'replace') return res.status(400).json({ ok: false, error: 'mode must be merge or replace' });
+  let zipPath;
+  try {
+    fs.mkdirSync(BACKUPS, { recursive: true });
+    zipPath = path.join(BACKUPS, 'import-' + stamp() + '.zip');
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: 'could not prepare the backups folder: ' + e.message });
+  }
+  // stream the body straight into backups/import-<ts>.zip: express.raw would hold the
+  // whole zip in memory (and writeFileSync caps out at 2 GiB anyway)
+  const out = fs.createWriteStream(zipPath);
+  let bytes = 0, first = true, bad = null, responded = false;
+  const fail = (code, msg) => {
+    if (responded) return; responded = true;
+    try { out.destroy(); } catch (e) {}
+    try { fs.rmSync(zipPath, { force: true }); } catch (e) {}
+    res.status(code).json({ ok: false, error: msg });
+  };
+  req.on('data', (chunk) => {
+    if (bad) return;
+    if (first) {
+      first = false;
+      if (chunk.length < 4 || chunk[0] !== 0x50 || chunk[1] !== 0x4b) { bad = 'that is not a zip file'; fail(400, bad); req.destroy(); return; }
+    }
+    bytes += chunk.length;
+    if (bytes > IMPORT_MAX_BYTES) { bad = 'the zip is larger than 8 GB'; fail(413, bad); req.destroy(); return; }
+    if (!out.write(chunk)) { req.pause(); out.once('drain', () => req.resume()); }
+  });
+  req.on('error', () => fail(400, 'upload interrupted'));
+  req.on('aborted', () => fail(400, 'upload interrupted'));
+  req.on('end', () => { if (!bad) out.end(); });
+  out.on('error', (e) => fail(500, 'could not save the uploaded zip: ' + e.message));
+  out.on('finish', () => {
+    if (bad || responded) return;
+    if (!bytes) return fail(400, 'send the zip file as the raw request body');
+    responded = true;
+    importZip(zipPath, mode, res);
+  });
+});
+function importZip(zipPath, mode, res) {
+  const args = ['scripts/archive.py', 'import', zipPath];
+  if (mode === 'replace') args.push('--replace');
+  runProc(PY, args, { timeoutMs: ARCHIVE_TIMEOUT_MS }, (r) => {
+    if (r.code !== 0) {
+      const msg = r.error || tail(r.stderr || r.stdout) || ('archive.py exited ' + r.code);
+      console.error('  ✗ backup import failed:', msg);
+      return res.status(500).json({ ok: false, error: msg });
+    }
+    const m = /restored (\d+) file/.exec(r.stdout || '');
+    const written = m ? parseInt(m[1], 10) : 0;
+    // manifest: archive.py list prints it as JSON (best effort — null if absent)
+    runProc(PY, ['scripts/archive.py', 'list', zipPath], { timeoutMs: 60000 }, (l) => {
+      let manifest = null;
+      try { manifest = JSON.parse(l.stdout); } catch (e) {}
+      // the browser state comes back ONLY when this zip carried user/reading-state.json —
+      // a file left on disk by an earlier export must never overwrite the reader's current stars
+      runProc(PY, ['-c', 'import sys,zipfile; print("yes" if "user/reading-state.json" in zipfile.ZipFile(sys.argv[1]).namelist() else "no")', zipPath],
+        { timeoutMs: 60000 }, (z) => {
+          let state = null;
+          if (String(z.stdout).trim() === 'yes') {
+            try {
+              const rs = JSON.parse(fs.readFileSync(userPath('reading-state.json'), 'utf8'));
+              if (rs && rs.state && typeof rs.state === 'object' && !Array.isArray(rs.state)) state = rs.state;
+            } catch (e) {}
+          }
+          console.log('  ✓ restored ' + written + ' file(s) from ' + path.relative(REPO, zipPath) + (mode === 'replace' ? ' (replace)' : ' (merged)'));
+          runBuild((code) => res.json({ ok: true, written, manifest, state, mode, build: code === 0 }));
+        });
+    });
+  });
+}
+
+// --- updates (plain git on the clone — the repo may be private, so never the GitHub API) ---
+// Non-interactive everywhere: no terminal prompts, ssh in batch mode, hard timeouts.
+const GIT_ENV = Object.assign({}, process.env, {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || 'ssh -oBatchMode=yes',
+});
+function gitP(args, timeoutMs) { return runP('git', args, { env: GIT_ENV, timeoutMs: timeoutMs || 15000 }); }
+function localVersion() {
+  try { return fs.readFileSync(path.join(REPO, 'VERSION'), 'utf8').trim() || null; } catch (e) { return null; }
+}
+const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
+// Copies downloaded as a ZIP have no .git: they check the published VERSION on GitHub
+// and update by downloading the branch archive and overlaying the app files in place
+// (scripts/update_zip.py — the reader's data dirs are never written). RR_UPDATE_BASE
+// is a test hook: a base URL serving VERSION, CHANGELOG.md and release.zip.
+const UPDATE_REPO = process.env.RR_UPDATE_REPO || 'FrancescoPiatti/Reading-Room';
+const UPDATE_BRANCH = process.env.RR_UPDATE_BRANCH || 'main';
+const UPDATE_BASE = process.env.RR_UPDATE_BASE || null;
+function updateUrls() {
+  if (UPDATE_BASE) return { version: UPDATE_BASE + '/VERSION', changelog: UPDATE_BASE + '/CHANGELOG.md', zip: UPDATE_BASE + '/release.zip' };
+  const raw = 'https://raw.githubusercontent.com/' + UPDATE_REPO + '/' + UPDATE_BRANCH + '/';
+  return { version: raw + 'VERSION', changelog: raw + 'CHANGELOG.md', zip: 'https://github.com/' + UPDATE_REPO + '/archive/refs/heads/' + UPDATE_BRANCH + '.zip' };
+}
+async function fetchText(url, timeoutMs) {
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs || 15000);
+  try {
+    const r = await fetch(url, { signal: ac.signal, headers: { 'User-Agent': 'ReadingRoom/' + (localVersion() || '1') + ' (update check)' }, redirect: 'follow' });
+    const text = r.ok ? await r.text() : '';
+    return { ok: r.ok, status: r.status, text };
+  } catch (e) {
+    return { ok: false, status: 0, text: '', error: e.name === 'AbortError' ? 'timed out' : e.message };
+  } finally { clearTimeout(t); }
+}
+// semver-ish compare: "1.2.0" vs "1.10.1" → numeric per segment; null/garbage sorts lowest
+function cmpVersions(a, b) {
+  const pa = String(a || '0').split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = String(b || '0').split('.').map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d > 0 ? 1 : -1;
+  }
+  return 0;
+}
+// bullets of every CHANGELOG section newer than `local` → the modal's change list
+function changelogSince(md, local) {
+  const out = [];
+  let take = false;
+  for (const line of String(md || '').split(/\r?\n/)) {
+    const h = /^##\s+(\d+(?:\.\d+)*)\b/.exec(line);
+    if (h) { take = cmpVersions(h[1], local) > 0; continue; }
+    if (!take) continue;
+    const b = /^\s*[-*]\s+(.+)/.exec(line);
+    if (b) out.push({ sha: '', subject: b[1].replace(/\*\*/g, '').replace(/`/g, '').slice(0, 200) });
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+// stream a URL to a file (release zip); rejects on HTTP errors, caps the size
+async function downloadTo(url, dest, maxBytes) {
+  const r = await fetch(url, { redirect: 'follow', headers: { 'User-Agent': 'ReadingRoom/' + (localVersion() || '1') + ' (update)' } });
+  if (!r.ok || !r.body) throw new Error('download failed (HTTP ' + r.status + ')');
+  let bytes = 0;
+  const out = fs.createWriteStream(dest);
+  for await (const chunk of r.body) {
+    bytes += chunk.length;
+    if (bytes > maxBytes) { out.destroy(); throw new Error('the update archive is unexpectedly large (> ' + Math.round(maxBytes / 1048576) + ' MB)'); }
+    if (!out.write(chunk)) await new Promise((res) => out.once('drain', res));
+  }
+  await new Promise((res, rej) => { out.on('error', rej); out.end(res); });
+  return bytes;
+}
+let updateCache = null;      // last check result (the /api/update payload)
+let updateInFlight = null;   // Promise while a check runs — concurrent callers share it
+let applyingUpdate = false;
+
+async function doUpdateCheck() {
+  const r = {
+    ok: true, git: false, method: 'zip', checked: null, available: false, behind: 0, ahead: 0, branch: UPDATE_BRANCH,
+    local: { commit: null, version: localVersion() }, remote: { commit: null, version: null },
+    changes: [], upgradingChanged: false, error: null,
+  };
+  const done = (err) => { r.error = err || null; r.checked = new Date().toISOString(); return r; };
+  const inside = await gitP(['rev-parse', '--is-inside-work-tree']);
+  if (inside.code !== 0 || inside.stdout.trim() !== 'true' || !fs.existsSync(path.join(REPO, '.git'))) {
+    // a ZIP download: compare the published VERSION, list the newer CHANGELOG sections
+    const urls = updateUrls();
+    const v = await fetchText(urls.version, 15000);
+    if (!v.ok) return done('Could not check for updates (' + (v.error || ('HTTP ' + v.status)) + ' fetching the published version — offline, or the repository is private).');
+    r.remote.version = v.text.trim().split(/\s+/)[0] || null;
+    if (!r.remote.version) return done('The update server has no VERSION file.');
+    r.available = cmpVersions(r.remote.version, r.local.version) > 0;
+    if (r.available) {
+      const cl = await fetchText(urls.changelog, 15000);
+      r.changes = cl.ok ? changelogSince(cl.text, r.local.version) : [];
+      r.behind = r.changes.length;
+    }
+    return done(null);
+  }
+  r.git = true; r.method = 'git';
+  r.local.commit = (await gitP(['rev-parse', '--short', 'HEAD'])).stdout.trim() || null;
+  let branch = (await gitP(['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
+  if (!branch || branch === 'HEAD' || branch.charAt(0) === '-') branch = 'main';   // detached -> main
+  r.branch = branch;
+  const origin = await gitP(['remote', 'get-url', 'origin']);
+  if (origin.code !== 0) return done('This copy has no "origin" remote to update from.');
+  const fetched = await gitP(['fetch', '--quiet', 'origin'], 30000);
+  if (fetched.code !== 0) return done('Could not reach the update server: ' + (fetched.error || tail(fetched.stderr, 300) || 'git fetch failed'));
+  const ref = 'origin/' + branch;
+  const rc = await gitP(['rev-parse', '--short', ref]);
+  if (rc.code !== 0) return done('The update server has no "' + branch + '" branch.');
+  r.remote.commit = rc.stdout.trim() || null;
+  r.behind = parseInt((await gitP(['rev-list', '--count', 'HEAD..' + ref])).stdout.trim(), 10) || 0;
+  r.ahead = parseInt((await gitP(['rev-list', '--count', ref + '..HEAD'])).stdout.trim(), 10) || 0;
+  const log = await gitP(['log', '--format=%h%x09%s', '-n', '30', 'HEAD..' + ref]);
+  r.changes = log.stdout.split(/\r?\n/).filter(Boolean).map((line) => {
+    const i = line.indexOf('\t');
+    return i === -1 ? { sha: line, subject: '' } : { sha: line.slice(0, i), subject: line.slice(i + 1) };
+  });
+  const rv = await gitP(['show', ref + ':VERSION']);
+  r.remote.version = rv.code === 0 ? (rv.stdout.trim() || null) : null;
+  const diff = await gitP(['diff', '--name-only', 'HEAD..' + ref]);
+  r.upgradingChanged = diff.stdout.split(/\r?\n/).indexOf('UPGRADING.md') !== -1;
+  r.available = r.behind > 0;
+  return done(null);
+}
+function checkForUpdate() {
+  if (updateInFlight) return updateInFlight;
+  updateInFlight = doUpdateCheck()
+    .catch((e) => ({ ok: true, git: false, checked: new Date().toISOString(), available: false, behind: 0, ahead: 0, branch: 'main',
+                     local: { commit: null, version: localVersion() }, remote: { commit: null, version: null },
+                     changes: [], upgradingChanged: false, error: e.message }))
+    .then((r) => {
+      updateCache = r; updateInFlight = null;
+      if (r.available) console.log('  • update available: ' + (r.remote.version || r.remote.commit) + ' (' + r.behind + ' change(s) behind)');
+      else if (r.error) console.log('  • update check: ' + r.error);
+      return r;
+    });
+  return updateInFlight;
+}
+function scheduleUpdateChecks() {
+  setTimeout(checkForUpdate, 5000).unref();
+  setInterval(checkForUpdate, UPDATE_EVERY_MS).unref();
+}
+
+app.get('/api/update', (req, res) => {
+  const refresh = String(req.query.refresh || '') === '1';
+  const p = (refresh || !updateCache) ? checkForUpdate() : Promise.resolve(updateCache);
+  p.then((r) => res.json(r)).catch((e) => res.status(500).json({ ok: false, error: e.message }));
+});
+
+// Apply: reset the generated docs/ (rebuildable), fast-forward pull, npm install if
+// the app's dependencies changed, rebuild. Progress goes out as ws broadcasts so the
+// page can show the steps; any failure reports the stage + a stderr tail and flags
+// that the reader's assistant (/update) can take over.
+app.post('/api/update/apply', async (req, res) => {
+  if (applyingUpdate) return res.status(409).json({ ok: false, error: 'an update is already running' });
+  applyingUpdate = true;
+  const progress = (step, msg) => broadcast({ type: 'update-progress', step, msg });
+  const fail = (stage, error, extra) => res.json(Object.assign({ ok: false, stage, error, needsAssistant: true }, extra || {}));
+  try {
+    const inside = await gitP(['rev-parse', '--is-inside-work-tree']);
+    if (inside.code !== 0 || inside.stdout.trim() !== 'true' || !fs.existsSync(path.join(REPO, '.git'))) {
+      // ZIP copy: download the release archive, overlay the app files (data untouched)
+      const info = updateCache && updateCache.method === 'zip' ? updateCache : await checkForUpdate();
+      if (!info.available) return fail('pull', info.error || 'No newer version is published.', { needsAssistant: false });
+      const from = localVersion();
+      progress('pull', 'Downloading Reading Room ' + (info.remote.version || '') + '…');
+      let zipPath;
+      try {
+        fs.mkdirSync(BACKUPS, { recursive: true });
+        zipPath = path.join(BACKUPS, 'update-' + stamp() + '.zip');
+        await downloadTo(updateUrls().zip, zipPath, 200 * 1024 * 1024);
+      } catch (e) {
+        try { if (zipPath) fs.rmSync(zipPath, { force: true }); } catch (e2) {}
+        return fail('pull', 'Could not download the update: ' + e.message, { needsAssistant: false });
+      }
+      progress('pull', 'Installing the new files (your library is not touched)…');
+      const up = await runP(PY, ['scripts/update_zip.py', zipPath], { cwd: REPO, timeoutMs: 5 * 60 * 1000, cap: 256 * 1024 });
+      try { fs.rmSync(zipPath, { force: true }); } catch (e) {}
+      let result = null;
+      try { result = JSON.parse(String(up.stdout || '').trim().split(/\r?\n/).pop()); } catch (e) {}
+      if (up.code !== 0 || !result) return fail('install', up.error || tail(up.stderr || up.stdout) || 'could not apply the archive', { needsAssistant: false });
+      const to = localVersion();
+      console.log('  ✓ updated ' + from + ' → ' + to + ' (' + (result.changed.length + result.added.length) + ' file(s) changed)');
+      if (result.installNeeded) {
+        progress('install', 'Installing updated dependencies…');
+        const win = process.platform === 'win32';
+        const npm = await runP(win ? 'npm.cmd' : 'npm', ['install', '--no-audit', '--no-fund'],
+          { cwd: path.join(REPO, 'workmode'), timeoutMs: 5 * 60 * 1000, shell: win, cap: 32 * 1024 });
+        if (npm.code !== 0) return fail('install', npm.error || tail(npm.stderr || npm.stdout) || 'npm install failed', { from, to, needsAssistant: false });
+      }
+      progress('build', 'Rebuilding the site…');
+      await new Promise((resolve) => runBuild(resolve));
+      try { await checkForUpdate(); } catch (e) {}
+      if (result.restartNeeded) restartPending = true;
+      return res.json({ ok: true, method: 'zip', from, to, restartNeeded: !!result.restartNeeded, restartable: RESTARTABLE, upgradingChanged: !!result.upgradingChanged });
+    }
+    let branch = (await gitP(['rev-parse', '--abbrev-ref', 'HEAD'])).stdout.trim();
+    if (!branch || branch === 'HEAD' || branch.charAt(0) === '-') branch = 'main';
+    const from = (await gitP(['rev-parse', '--short', 'HEAD'])).stdout.trim();
+
+    progress('pull', 'Checking the generated site…');
+    const st = await gitP(['status', '--porcelain', '--untracked-files=no', '--', 'docs']);
+    if (st.stdout.trim()) {
+      progress('pull', 'Resetting generated site files (docs/ is rebuilt afterwards)…');
+      const co = await gitP(['checkout', '--', 'docs'], 60000);
+      if (co.code !== 0) return fail('pull', co.error || tail(co.stderr));
+    }
+    progress('pull', 'Downloading the update…');
+    const pull = await gitP(['pull', '--ff-only', 'origin', branch], 120000);
+    if (pull.code !== 0) return fail('pull', pull.error || tail(pull.stderr || pull.stdout) || 'git pull failed');
+    const to = (await gitP(['rev-parse', '--short', 'HEAD'])).stdout.trim();
+    const diff = await gitP(['diff', '--name-only', from + '..' + to]);
+    const changed = diff.code === 0 ? diff.stdout.split(/\r?\n/).filter(Boolean) : [];
+    console.log('  ✓ updated ' + from + ' → ' + to + ' (' + changed.length + ' file(s) changed)');
+
+    if (changed.indexOf('workmode/package.json') !== -1 || changed.indexOf('workmode/package-lock.json') !== -1) {
+      progress('install', 'Installing updated dependencies…');
+      const win = process.platform === 'win32';
+      // constant args only — the shell is needed on Windows to run npm.cmd
+      const npm = await runP(win ? 'npm.cmd' : 'npm', ['install', '--no-audit', '--no-fund'],
+        { cwd: path.join(REPO, 'workmode'), timeoutMs: 5 * 60 * 1000, shell: win, cap: 32 * 1024 });
+      if (npm.code !== 0) return fail('install', npm.error || tail(npm.stderr || npm.stdout) || 'npm install failed', { from, to });
+    }
+    progress('build', 'Rebuilding the site…');
+    await new Promise((resolve) => runBuild(resolve));
+    // refresh the cached check BEFORE answering, so a page that reloads right after
+    // the apply reads "up to date" instead of the stale "update available" payload
+    try { await checkForUpdate(); } catch (e) {}
+    const restartNeeded = changed.some((f) => f.indexOf('workmode/') === 0);
+    if (restartNeeded) restartPending = true;     // survives "Later": /api/status carries it until the restart
+    res.json({
+      ok: true, method: 'git', from, to, restartNeeded, restartable: RESTARTABLE,
+      upgradingChanged: changed.indexOf('UPGRADING.md') !== -1,
+    });
+  } catch (e) {
+    fail('pull', e.message);
+  } finally {
+    applyingUpdate = false;
+  }
+});
+
+// Exit code 75 means "restart me": the launchers loop and relaunch the server on it.
+app.post('/api/update/restart', (req, res) => {
+  if (!RESTARTABLE) {
+    return res.status(409).json({ ok: false, error: 'This server was not started by the Reading Room launcher, so it cannot restart itself — stop it (Ctrl-C) and start it again.' });
+  }
+  broadcast({ type: 'restarting' });
+  res.json({ ok: true });
+  console.log('\n  • restarting on request (exit 75)');
+  setTimeout(() => { killTerm(); process.exit(75); }, 300);
+});
+
 // Stream an arXiv PDF through the local origin so it can be shown INSIDE the app
 // (an iframe straight to arxiv.org would be blocked by X-Frame-Options and would
 // strand the chromeless window). The host is hardcoded to arXiv and the id is
@@ -461,7 +982,7 @@ app.get('/pdf', async (req, res) => {
   if (fs.existsSync(local)) { res.type('application/pdf'); return res.sendFile(local); }
 
   try {
-    const up = await fetch('https://arxiv.org/pdf/' + id, { headers: { 'User-Agent': 'ReadingRoom/1.0 (local work mode)' } });
+    const up = await fetch('https://arxiv.org/pdf/' + id, { headers: { 'User-Agent': 'ReadingRoom/1.0 (local app)' } });
     if (!up.ok || !up.body) return res.status(502).send('arXiv returned ' + up.status);
     res.type('application/pdf');
     Readable.fromWeb(up.body).pipe(res);
@@ -478,10 +999,10 @@ app.get('/__workmode/vendor/:file', (req, res) => {
   res.sendFile(f);
 });
 
-// --- work-mode client (css/js) ---
+// --- app client (css/js) ---
 app.use('/__workmode', express.static(CLIENT));
 
-// --- HTML pages: inject the work-mode client on the fly ---
+// --- HTML pages: inject the app client on the fly ---
 app.get('*', (req, res, next) => {
   const htmlPath = resolveHtml(req.path);
   if (!htmlPath) return next();
@@ -503,7 +1024,7 @@ const wss = new WebSocketServer({
   server,
   path: '/__workmode/ws',
   // Reject any upgrade that isn't from our own loopback page. Without this, ANY
-  // website the user visits while work mode runs could open this socket, spawn the
+  // website the user visits while the app runs could open this socket, spawn the
   // shell, and run arbitrary commands (drive-by RCE). Mirrors the HTTP guard above.
   verifyClient: (info) => {
     const ok = isLoopbackOrigin(info.origin) && isLoopbackHost(info.req.headers.host);
@@ -568,6 +1089,218 @@ function spawnSharedTerm(cols, rows) {
   });
 }
 
+// ----------------------------------------------------------------------------
+// Job bookkeeping for the one-click flows (Analyze / Compare / Deep dive / Discuss)
+// ----------------------------------------------------------------------------
+// The page tells us the moment it has submitted a flow command to the booted
+// assistant (job-start). We take a SNAPSHOT of what the library holds right then
+// and start polling whether the shared shell still has a child process: an
+// assistant quit from the terminal (Ctrl-C, /exit) leaves the shell childless, and
+// after three consecutive empty polls every page hears agent-exited — so an overlay
+// never spins forever over a run that is already dead. On job-stop we kill the
+// shell + the assistant inside it (a user stop) and ROLL BACK: whatever exists now
+// but was NOT in the snapshot is removed and a deep dive's digest is restored
+// byte-for-byte. Nothing that was in the snapshot is ever touched — "Stop" can only
+// undo what this very run added.
+const JOB_KINDS = ['analyze', 'compare', 'deepdive', 'discuss'];
+const JOB_POLL_MS = 2000;
+const JOB_EXIT_POLLS = 3;     // consecutive childless polls before agent-exited
+let activeJob = null;         // { kind, id, snapshot, startedAt, exitAnnounced }
+let jobPollTimer = null;
+let jobPollBusy = false;
+let jobIdlePolls = 0;
+
+// Same shape rule as every id the API accepts: no separators, no '..'.
+function safeSlug(raw) {
+  const id = String(raw || '').trim();
+  return (id && /^[A-Za-z0-9._-]+$/.test(id) && id.indexOf('..') === -1) ? id : null;
+}
+function listSubdirs(base) {
+  try { return fs.readdirSync(base, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); }
+  catch (e) { return []; }
+}
+function takeJobSnapshot(kind, id) {
+  const snap = {
+    // every folder is protected, digest or not (a stray notes.md is the reader's);
+    // the *With sets say which of them already held their data file
+    reportDirs: new Set(listSubdirs(REPORTS)),   reports: new Set(listDirsWith(REPORTS, 'digest.json')),
+    compareDirs: new Set(listSubdirs(COMPARES)), compares: new Set(listDirsWith(COMPARES, 'compare.json')),
+    chatDirs: new Set(listSubdirs(CHATS)),       chats: new Set(listDirsWith(CHATS, 'chat.json')),
+    pdfs: new Set(listPdfs()),
+    digest: null,                                // deepdive: the exact bytes to put back
+  };
+  // deep dive edits a digest in place; re-analysing a catalogued paper overwrites one —
+  // keep the exact bytes so a Stop puts the report back as it was
+  if ((kind === 'deepdive' || kind === 'analyze') && id) {
+    try { snap.digest = fs.readFileSync(path.join(REPORTS, id, 'digest.json')); } catch (e) {}
+  }
+  return snap;
+}
+
+// Undo what a stopped run added under one data dir. A folder that did not exist at
+// job start is removed whole (with its generated page); a folder that existed but
+// had no <file> then and has one now loses just that new file. Returns the
+// repo-relative paths removed. Never touches anything the snapshot already had.
+function rollbackDir(base, file, dirsThen, withFileThen, docsBase, only) {
+  const removed = [];
+  for (const name of listSubdirs(base)) {
+    if (only && name !== only) continue;          // the run's own target is known: touch nothing else
+    const dir = path.join(base, name);
+    try {
+      if (!dirsThen.has(name)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+        removed.push(path.relative(REPO, dir));
+      } else if (!withFileThen.has(name) && fs.existsSync(path.join(dir, file))) {
+        fs.rmSync(path.join(dir, file), { force: true });
+        removed.push(path.relative(REPO, path.join(dir, file)));
+      } else continue;
+      fs.rmSync(path.join(docsBase, name), { recursive: true, force: true });
+    } catch (e) { console.error('  ! rollback: could not remove ' + path.relative(REPO, dir) + ' — ' + e.message); }
+  }
+  return removed;
+}
+// Scoped to what the run's KIND can have written (a Discuss never touches reports/,
+// so a paper analysed meanwhile from a separate terminal is not collateral), and to
+// the run's own target when its id is known.
+function rollbackJob(job) {
+  const s = job.snapshot, k = job.kind;
+  let removed = [], restored = false;
+  if (k === 'analyze') {
+    removed = removed.concat(rollbackDir(REPORTS, 'digest.json', s.reportDirs, s.reports, path.join(DOCS, 'papers'), job.id || null));
+    for (const n of listPdfs()) {
+      if (s.pdfs.has(n)) continue;
+      if (job.id && n !== job.id + '.pdf') continue;
+      try { fs.rmSync(path.join(PAPERS, n), { force: true }); removed.push(path.relative(REPO, path.join(PAPERS, n))); }
+      catch (e) { console.error('  ! rollback: could not remove papers/' + n + ' — ' + e.message); }
+    }
+  } else if (k === 'compare') {
+    removed = removed.concat(rollbackDir(COMPARES, 'compare.json', s.compareDirs, s.compares, path.join(DOCS, 'compare')));
+  } else if (k === 'discuss') {
+    removed = removed.concat(rollbackDir(CHATS, 'chat.json', s.chatDirs, s.chats, path.join(DOCS, 'chat')));
+  }
+  if ((k === 'deepdive' || k === 'analyze') && s.digest && job.id) {
+    const dj = path.join(REPORTS, job.id, 'digest.json');
+    let now = null;
+    try { now = fs.readFileSync(dj); } catch (e) {}
+    if (!now || !now.equals(s.digest)) {
+      try { fs.writeFileSync(dj, s.digest); restored = true; }
+      catch (e) { console.error('  ! rollback: could not restore ' + path.relative(REPO, dj) + ' — ' + e.message); }
+    }
+  }
+  return { removed, restored };
+}
+
+// How many direct children does the shared shell have? 0 = the assistant is gone;
+// null = could not tell (tool missing / timed out) — never counted as a strike.
+function countShellChildren(cb) {
+  const pid = sharedTerm ? (sharedTerm.pid | 0) : 0;
+  if (!pid) return cb(0);                        // no shell at all: nothing can be running
+  if (process.platform === 'win32') {
+    runProc('powershell', ['-NoProfile', '-Command', "(Get-CimInstance Win32_Process -Filter 'ParentProcessId=" + pid + "').Count"],
+      { timeoutMs: 8000, cap: 4096 }, (r) => {
+        const n = parseInt(String(r.stdout).trim(), 10);
+        cb(r.code === 0 && !isNaN(n) ? n : null);
+      });
+  } else {
+    // a login shell that exec's tmux/screen makes the pty process a multiplexer CLIENT
+    // whose children live under the mux server — "no children" would be a false exit
+    runProc('ps', ['-o', 'comm=', '-p', String(pid)], { timeoutMs: 5000, cap: 4096 }, (ps) => {
+      if (/(^|\/)(tmux|screen|zellij)(\s|$)/.test(String(ps.stdout || ''))) return cb(null);
+      runProc('pgrep', ['-P', String(pid)], { timeoutMs: 5000, cap: 4096 }, (r) => {
+        if (r.code === 0) return cb(r.stdout.split(/\r?\n/).filter(Boolean).length || 1);
+        if (r.code === 1) return cb(0);            // pgrep: exit 1 = nothing matched
+        cb(null);
+      });
+    });
+  }
+}
+function stopJobPoll() {
+  if (jobPollTimer) { clearInterval(jobPollTimer); jobPollTimer = null; }
+  jobIdlePolls = 0;
+}
+function startJobPoll() { stopJobPoll(); jobPollTimer = setInterval(pollJob, JOB_POLL_MS); }
+function pollJob() {
+  if (!activeJob || jobPollBusy) return;
+  const job = activeJob;
+  jobPollBusy = true;
+  countShellChildren((n) => {
+    jobPollBusy = false;
+    if (activeJob !== job || !jobPollTimer) return;   // the job ended / was replaced meanwhile
+    if (n === null) return;
+    jobIdlePolls = n === 0 ? jobIdlePolls + 1 : 0;
+    if (jobIdlePolls >= JOB_EXIT_POLLS) {
+      stopJobPoll();                                   // keep activeJob: a job-stop can still roll back
+      job.exitAnnounced = true;
+      console.log('  • the assistant exited before the ' + job.kind + ' run finished');
+      broadcast({ type: 'agent-exited', kind: job.kind, id: job.id });
+    }
+  });
+}
+
+// Kill the shared shell AND the assistant inside it (a user stop). The epoch bump
+// turns the dying shell's async onExit into a no-op, so terminal pages get exactly
+// one 'exit' — the one sent here, exactly like a normal shell exit. The children
+// are ended explicitly on top of the tty hang-up, so a process that ignores SIGHUP
+// still goes; cb fires once the signals are out.
+function killTermForJob(cb) {
+  const term = sharedTerm;
+  if (!term) return cb();
+  const pid = term.pid | 0;
+  const myEpoch = ++termEpoch;
+  sharedTerm = null; termBuffer = '';
+  const finish = (kids) => {
+    try { term.kill(); } catch (e) {}
+    (kids || []).forEach((k) => { try { process.kill(k, 'SIGTERM'); } catch (e) {} });
+    // a respawn may already have started a NEW shell while pgrep ran — then this
+    // 'exit' would tear the fresh session down on the client; only announce our own
+    if (termEpoch === myEpoch && !sharedTerm) broadcastTerm({ type: 'exit' });
+    cb();
+  };
+  if (process.platform === 'win32') {
+    runProc('taskkill', ['/T', '/F', '/PID', String(pid)], { timeoutMs: 8000, cap: 4096 }, () => finish([]));   // whole tree
+  } else {
+    runProc('pgrep', ['-P', String(pid)], { timeoutMs: 5000, cap: 4096 }, (r) => {
+      const kids = r.code === 0 ? r.stdout.split(/\r?\n/).map((x) => parseInt(x, 10)).filter((k) => k > 1 && k !== process.pid) : [];
+      finish(kids);
+    });
+  }
+}
+function sendTo(ws, msg) {
+  if (ws && ws.readyState === 1) { try { ws.send(JSON.stringify(msg)); return; } catch (e) {} }
+  broadcast(msg);   // the requesting page navigated away: let whichever page is open know
+}
+// job-stop: reason 'user' = the reader pressed Stop (kill the assistant, then roll
+// back); 'exited' = the client learnt the assistant is already gone (just roll back).
+// Always answers the requester with job-stopped, even when no job was registered.
+// A Stop pressed before this page's run was registered: kill the booting assistant,
+// roll back NOTHING (whatever is registered belongs to another page's finished or
+// still-running work).
+function killOnly(ws) {
+  killTermForJob(() => sendTo(ws, { type: 'job-stopped', reason: 'user', removed: [], restored: false }));
+}
+// The watcher saw the run's artifact land: the run is complete — drop the snapshot so
+// no later Stop (from any page) can roll finished work back.
+function completeJob(what) {
+  if (!activeJob) return;
+  console.log('  ✓ ' + activeJob.kind + ' run finished (' + what + ')');
+  activeJob = null; stopJobPoll();
+}
+function stopJob(ws, reason) {
+  const job = activeJob;
+  activeJob = null;
+  stopJobPoll();
+  const finish = () => {
+    const r = job ? rollbackJob(job) : { removed: [], restored: false };
+    if (job) console.log('  • ' + job.kind + ' run stopped (' + reason + ')' +
+      (r.removed.length ? ' — removed ' + r.removed.join(', ') : '') + (r.restored ? ' — digest restored' : ''));
+    const reply = () => sendTo(ws, { type: 'job-stopped', reason, removed: r.removed, restored: r.restored });
+    if (r.removed.length || r.restored) runBuild(reply); else reply();
+  };
+  // after a kill, give the process tree a moment to die so a write in flight is caught too
+  if (reason === 'user') killTermForJob(() => setTimeout(finish, 700));
+  else finish();
+}
+
 // Quit when the last app window goes away (after a grace period so a page reload
 // or internal navigation — which briefly drops to 0 clients — doesn't kill it).
 let shutdownTimer = null;
@@ -616,7 +1349,14 @@ wss.on('connection', (ws) => {
       termSubs.add(ws);
       const cols = Math.min(1000, Math.max(1, (m.cols | 0) || 80));
       const rows = Math.min(1000, Math.max(1, (m.rows | 0) || 24));
-      killTerm();
+      if (activeJob) {
+        // a registered run would die silently with the old shell — stop it properly
+        // (kill its process tree, roll back, answer job-stopped) instead of orphaning it
+        console.log('  • respawn while a ' + activeJob.kind + ' run is registered — stopping it first');
+        stopJob(ws, 'user');
+      } else {
+        killTerm();
+      }
       termBuffer = '';
       spawnSharedTerm(cols, rows);
       try { ws.send(JSON.stringify({ type: 'ready' })); } catch (e) {}
@@ -626,6 +1366,25 @@ wss.on('connection', (ws) => {
       const c = Math.min(1000, Math.max(1, m.cols | 0));
       const r = Math.min(1000, Math.max(1, m.rows | 0));
       try { sharedTerm.resize(c, r); } catch (e) {}
+    } else if (m.type === 'job-start') {
+      // the flow command has just been submitted to the booted assistant
+      if (JOB_KINDS.indexOf(m.kind) === -1) return;
+      const id = safeSlug(m.id);
+      if (activeJob) console.log('  • a ' + activeJob.kind + ' run was still registered — replaced');
+      const token = crypto.randomBytes(8).toString('hex');
+      activeJob = { kind: m.kind, id, token, snapshot: takeJobSnapshot(m.kind, id), startedAt: new Date().toISOString(), exitAnnounced: false };
+      startJobPoll();
+      console.log('  • ' + m.kind + ' run started' + (id ? ' (' + id + ')' : ''));
+      // the token is the page's proof it owns this run: only its holder can end or roll it back
+      sendTo(ws, { type: 'job-started', kind: m.kind, id, token });
+    } else if (m.type === 'job-end') {
+      // the client verified the result landed
+      if (activeJob && m.token === activeJob.token) completeJob('verified by the page');
+    } else if (m.type === 'job-stop') {
+      const reason = m.reason === 'exited' ? 'exited' : 'user';
+      if (activeJob && m.token && m.token === activeJob.token) stopJob(ws, reason);
+      else if (!m.token && reason === 'user') killOnly(ws);
+      else sendTo(ws, { type: 'job-stopped', reason, removed: [], restored: false, stale: true });   // not this page's run
     }
   });
 
@@ -680,13 +1439,23 @@ function startWatcher() {
   };
   watcher.on('add', (p) => {
     let s;
-    if ((s = slugUnder(REPORTS, 'digest.json', p))) broadcast({ type: 'report-added', id: s });   // new paper (Analyze)
-    else if ((s = slugUnder(COMPARES, 'compare.json', p))) broadcast({ type: 'compare-added', slug: s }); // new comparison (Compare)
-    else if ((s = slugUnder(CHATS, 'chat.json', p))) broadcast({ type: 'chat-added', slug: s });   // new discussion (Discuss)
+    if ((s = slugUnder(REPORTS, 'digest.json', p))) {
+      broadcast({ type: 'report-added', id: s });   // new paper (Analyze)
+      if (activeJob && activeJob.kind === 'analyze') completeJob('reports/' + s + ' landed');
+    } else if ((s = slugUnder(COMPARES, 'compare.json', p))) {
+      broadcast({ type: 'compare-added', slug: s }); // new comparison (Compare)
+      if (activeJob && activeJob.kind === 'compare') completeJob('compares/' + s + ' landed');
+    } else if ((s = slugUnder(CHATS, 'chat.json', p))) {
+      broadcast({ type: 'chat-added', slug: s });   // new discussion (Discuss)
+      if (activeJob && activeJob.kind === 'discuss') completeJob('chats/' + s + ' landed');
+    }
     trigger(p);
   }).on('change', (p) => {
     const s = slugUnder(REPORTS, 'digest.json', p);
-    if (s) broadcast({ type: 'report-changed', id: s });   // existing digest changed (Deep dive landed)
+    if (s) {
+      broadcast({ type: 'report-changed', id: s });   // existing digest changed (Deep dive landed)
+      if (activeJob && activeJob.id === s && (activeJob.kind === 'deepdive' || activeJob.kind === 'analyze')) completeJob('reports/' + s + ' rewritten');
+    }
     trigger(p);
   }).on('unlink', (p) => {
     // /setup deletes the intake file as its last step — that's the "setup finished"
@@ -752,7 +1521,7 @@ function openApp(url) {
 // Startup: prereq checks, build once, listen (with port fallback), watch, open
 // ----------------------------------------------------------------------------
 function preflight() {
-  console.log('\nReading Room — work mode');
+  console.log('\nReading Room — app server');
   console.log('  repo:   ' + REPO);
   if (!fs.existsSync(DOCS) || !fs.existsSync(path.join(DOCS, 'index.html'))) {
     console.log('  • docs/ not built yet — running the build once…');
@@ -776,7 +1545,16 @@ function listenWithFallback(port, triesLeft) {
     console.log('\n  ✓ serving on ' + url + '  (loopback only)');
     console.log('    static GitHub Pages browse path is unaffected.\n');
     startWatcher();
+    scheduleUpdateChecks();   // 5 s after listening, then every 6 h
     if (!NO_OPEN) openApp(url);
+    else if (!KEEPALIVE) {
+      // relaunched after an update with no window of our own: if the page that asked
+      // for the restart never comes back (the reader closed it), don't linger as a
+      // hidden zombie that the next double-click can't see
+      setTimeout(() => {
+        if (clients.size === 0) { console.log('  • no app window connected within 30 s — quitting'); killTerm(); process.exit(0); }
+      }, 30000);
+    }
   });
   server.once('error', (e) => {
     if (e.code === 'EADDRINUSE' && triesLeft > 0) {

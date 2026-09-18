@@ -7,10 +7,10 @@ description: "Discuss an already-catalogued paper interactively, then on End cha
 
 ## Invocation
 
-Invoke explicitly as `$learn <id-or-arxiv> [opening question or topic] [--approve]` in Codex or `/learn <id-or-arxiv> [opening question or topic] [--approve]` in Reading Room work mode. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
+Invoke explicitly as `$learn <id-or-arxiv> [opening question or topic] [--approve]` in Codex or `/learn <id-or-arxiv> [opening question or topic] [--approve]` in the Reading Room app. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
 
 
-You are having an **interactive discussion** about one paper already in the Reading Room, and then — only when the reader signals **done** (the work-mode **End chat** button sends this, or they type "done"/"that's it"/"wrap up") — **compacting** that conversation into a standalone record stored as `chats/<slug>/chat.json` and rendered **like a comparison**: its own page plus a **"Discussions"** entry **below the reading list**. It is a **chat record, not a worked derivation** (for proofs / full derivations / mechanism traces use `/deep-dive`). It must **never become a paper or catalogue card**, and must **never modify any digest**. Work **interactively**; do **not** use an external assistant API or a non-interactive assistant CLI.
+You are having an **interactive discussion** about one paper already in the Reading Room, and then — only when the reader signals **done** (the app's **End chat** button sends this, or they type "done"/"that's it"/"wrap up") — **compacting** that conversation into a standalone record stored as `chats/<slug>/chat.json` and rendered **like a comparison**: its own page plus a **"Discussions"** entry **below the reading list**. It is a **chat record, not a worked derivation** (for proofs / full derivations / mechanism traces use `/deep-dive`). It must **never become a paper or catalogue card**, and must **never modify any digest**. Work **interactively**; do **not** use an external assistant API or a non-interactive assistant CLI.
 
 ## Input
 `$ARGUMENTS` = a paper id (arXiv id or report slug), optionally an opening question/topic, and `--approve`.
@@ -21,6 +21,8 @@ You are having an **interactive discussion** about one paper already in the Read
 
 ## The conversation
 Have a **real back-and-forth** grounded in the paper: answer the reader's questions, pressure-test assumptions, surface connections, and work through *their* framing. Pitch it to the reader's profile (assume fluency in their expertise) and `config.tone`. Ground every claim in the paper — cite section/figure/equation numbers; if you go beyond the paper, say so; never invent results. **Keep the discussion going and write NOTHING** until the reader signals **done** (the **End chat** button, or "done"/"that's it"/"wrap up").
+
+**Reader's profile.** Before the first reply read `user/profile.json` (expertise, defaults) and, when it exists, `user/profile.md` — the reader's free-form full profile (background, current projects, what they want from reports, style preferences), seeded by `/setup` and edited by the reader. The Markdown tells you what they're working on and what they care about, so the discussion connects to *their* problems instead of staying generic; it complements `profile.json` and never overrides the question they actually asked. If it's absent, carry on without it (don't create it here).
 
 ## On "done" — compact, then write (with approval)
 1. **Compact** the conversation into a self-contained record — not a transcript, a distilled note a future reader would value: the **questions we resolved**, the **key insights**, and the **reader's framing / positions** (keep a short "still open" note if useful).

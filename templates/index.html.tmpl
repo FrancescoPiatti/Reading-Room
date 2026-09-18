@@ -148,7 +148,7 @@ function render(){
     emptyEl.hidden = false;
     // a fresh install (no papers at all) gets a welcome + call to action, not a "no match"
     emptyEl.innerHTML = CATALOGUE.length === 0
-      ? 'No papers yet — add your first with <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant (Claude, Codex, or Gemini) — it builds the page for you.'
+      ? 'No papers yet — add your first with the <b>Analyze paper</b> button in the app (or <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant) — the page builds itself.'
       : 'No papers match that.';
   } else {
     emptyEl.hidden = true;

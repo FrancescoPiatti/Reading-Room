@@ -1,13 +1,15 @@
 /* ===========================================================================
-   workmode.css — styles for the local work-mode UI (terminal drawer, launcher,
-   toast). Injected ONLY by the local server; never part of the static docs/.
+   workmode.css — styles for the app's local UI (terminal drawer, launcher,
+   overlays, toast). Injected ONLY by the local server; never part of the static docs/.
 
    Composes exclusively from base.css design tokens (--bg-card, --bg-raised,
    --line, --ink*, --accent, --accent-dim, --link, --shadow-card, --mono), so it
    themes light/dark for free via the page's existing data-theme toggle. The only
-   NEW custom property is --rr-wm-h (drawer height) — additive, not a color.
+   NEW custom properties are --rr-wm-h (drawer height) and --rr-wm-danger (the
+   one colour base.css has no token for: a destructive Stop) — both additive.
    =========================================================================== */
-:root { --rr-wm-h: 340px; }
+:root { --rr-wm-h: 340px; --rr-wm-danger: #c2410c; --rr-wm-danger-dim: rgba(194,65,12,0.12); }
+[data-theme="dark"] { --rr-wm-danger: #ff9466; --rr-wm-danger-dim: rgba(255,148,102,0.16); }
 
 /* ---- floating launcher (bottom-right) ---- */
 .rr-wm-launch {
@@ -230,3 +232,69 @@ select.rr-flow-select { appearance: auto; -webkit-appearance: menulist; cursor: 
 .rr-flow-place > label { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft); cursor: pointer; flex-wrap: wrap; }
 .rr-flow-place input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; flex: none; }
 .rr-flow-place select.rr-flow-select { width: auto; max-width: 260px; padding: 6px 9px; font-size: 12.5px; }
+
+/* ---- Stop discussion (drawer bar) + Stop run (overlay): destructive, ghost by default ---- */
+.rr-wm-stopchat { color: var(--rr-wm-danger); }
+.rr-wm-stopchat:hover { color: var(--rr-wm-danger); border-color: var(--rr-wm-danger); }
+.rr-wm-btn.rr-wm-danger-ghost { color: var(--rr-wm-danger); }
+.rr-wm-btn.rr-wm-danger-ghost:hover { border-color: var(--rr-wm-danger); background: var(--rr-wm-danger-dim); }
+.rr-wm-btn.rr-wm-danger { background: var(--rr-wm-danger); border-color: var(--rr-wm-danger); color: var(--bg); }
+.rr-wm-btn.rr-wm-danger:hover { border-color: var(--rr-wm-danger); filter: brightness(1.06); }
+.rr-wm-btn:disabled { opacity: .5; cursor: default; }
+.rr-analyze-stop { margin-top: 26px; }
+.rr-analyze-stop > .rr-wm-btn { box-shadow: none; }
+.rr-analyze-stop [hidden] { display: none; }
+.rr-analyze-stoprow {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-card);
+}
+.rr-analyze-stoprow .rr-wm-btn { box-shadow: none; }
+.rr-analyze-stoptxt { flex-basis: 100%; font-size: 13px; color: var(--ink); line-height: 1.45; }
+.rr-analyze-stopmark { font-size: 26px; line-height: 1; color: var(--ink-faint); margin-bottom: 14px; }
+
+/* ---- Compare form: search box above the checklist + the optional question ---- */
+.rr-flow-search { margin-bottom: 4px; }
+.rr-flow-row[hidden], .rr-flow-empty[hidden] { display: none; }
+.rr-analyze-label--gap { margin-top: 18px; }
+
+/* ---- Updates modal (composes with base.css .rr-modal / .rr-btn classes) ---- */
+.rr-upd-body { font-size: 14px; line-height: 1.55; color: var(--ink); }
+.rr-upd-p { margin: 0 0 12px; }
+.rr-upd-p:last-child { margin-bottom: 0; }
+.rr-upd-p code, .rr-upd-list code { font-family: var(--mono); font-size: 12px; background: var(--bg-raised); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; }
+.rr-upd-row { display: flex; align-items: center; gap: 10px; }
+.rr-upd-note { font-size: 13px; color: var(--ink-soft); background: var(--accent-dim); border-radius: 8px; padding: 8px 12px; }
+.rr-upd-list {
+  margin: 0 0 14px; padding: 10px 14px; max-height: 220px; overflow: auto; list-style: none;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg-raised);
+  font-size: 13px; color: var(--ink-soft);
+}
+.rr-upd-list li { padding: 3px 0; }
+.rr-upd-list code { background: var(--bg-card); }
+.rr-upd-steps { margin: 0 0 14px; padding: 0; list-style: none; }
+.rr-upd-step { display: flex; align-items: center; gap: 10px; padding: 7px 0; color: var(--ink-faint); }
+.rr-upd-step--active { color: var(--ink); }
+.rr-upd-step--done { color: var(--ink-soft); }
+.rr-upd-mark { width: 22px; flex: none; display: inline-flex; align-items: center; justify-content: center; font-family: var(--mono); color: var(--accent); }
+.rr-analyze-spinner.rr-upd-spin { width: 16px; height: 16px; margin: 0; border-width: 2px; display: inline-block; vertical-align: middle; }
+.rr-upd-err {
+  margin: 0 0 12px; padding: 10px 12px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-soft); background: var(--bg-raised); border: 1px solid var(--line); border-radius: 8px;
+}
+/* base.css sets display on these, which beats the UA [hidden] rule — mid-update the
+   modal must not be closable (no ×) and has no footer actions to show */
+.rr-upd-modal .rr-modal-x[hidden] { display: none; }
+.rr-upd-modal .rr-modal-foot:empty { display: none; }
+
+/* ---- assistant settings (model / reasoning effort) ---- */
+.rr-ai-gear { margin-left: auto; opacity: .8; }
+.rr-ai-gear.rr-on { opacity: 1; }
+.rr-ai-sum { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; color: var(--ink-faint); margin: 4px 0 0; }
+.rr-ai-cfg { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; margin: 10px 0 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-raised); }
+.rr-ai-cfg[hidden] { display: none; }
+.rr-ai-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rr-ai-field .rr-analyze-label { margin: 0; }
+.rr-ai-cfg .rr-analyze-help { grid-column: 1 / -1; margin: 0; }
+.rr-ai-cfg .rr-analyze-input.rr-bad { border-color: var(--rr-wm-danger, #b3361a); }
+.rr-aicfg-body .rr-analyze-ai { margin-top: 4px; }
+@media (max-width: 640px) { .rr-ai-cfg { grid-template-columns: 1fr; } }

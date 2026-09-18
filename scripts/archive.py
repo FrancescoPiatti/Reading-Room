@@ -40,7 +40,9 @@ ALLOWED_TOPS = set(DATA_DIRS + [PDF_DIR])
 MANIFEST = "manifest.json"
 FORMAT_VERSION = 1
 # transient / noise never worth archiving
-SKIP_NAMES = {".DS_Store", ".setup-intake.json"}
+# .install-id identifies THIS install (per-copy tutorial flag) and .desktop-shortcut-offered
+# is a per-machine one-shot marker — neither belongs in a backup that may be restored elsewhere.
+SKIP_NAMES = {".DS_Store", ".setup-intake.json", ".install-id", ".desktop-shortcut-offered"}
 
 
 def _ignored(p: Path) -> bool:
@@ -93,10 +95,23 @@ def do_export(out_path=None, include_pdfs=True):
         "includes_pdfs": include_pdfs,
         "counts": counts,
     }
-    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+    # write to a temp name and rename at the end, so an aborted export never leaves a
+    # truncated zip under the final name (or clobbers a previous good one)
+    part = out_path.with_name(out_path.name + ".part")
+    with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(MANIFEST, json.dumps(manifest, indent=2) + "\n")
         for f in _iter_files(include_pdfs):
-            zf.write(f, arcname=f.relative_to(ROOT).as_posix())
+            try:
+                zf.write(f, arcname=f.relative_to(ROOT).as_posix())
+            except OSError as e:
+                # a cloud-evicted ("dataless") file in OneDrive/iCloud times out on read;
+                # a silent skip would ship an incomplete backup, so stop with a clear message
+                zf.close()
+                part.unlink(missing_ok=True)
+                raise SystemExit(f"  ✗ could not read {f.relative_to(ROOT).as_posix()} ({e.strerror or e}). "
+                                 "If this folder is cloud-synced, make the file available offline "
+                                 "(\"Always Keep on This Device\") and export again.")
+    part.replace(out_path)
     return out_path, manifest
 
 
@@ -134,7 +149,9 @@ def _wipe_contents(d: Path):
     if not d.exists():
         return
     for child in d.iterdir():
-        if child.name == ".gitkeep":
+        # .gitkeep keeps the dir; SKIP_NAMES are per-install markers (install id, shortcut
+        # offer) that no backup carries — wiping them would re-run the first-run flow
+        if child.name == ".gitkeep" or child.name in SKIP_NAMES:
             continue
         if child.is_dir():
             shutil.rmtree(child)

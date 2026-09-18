@@ -6,7 +6,7 @@
      node .agents/skills/run-reading-room/driver.mjs serve          # start headless, print URL
      node .agents/skills/run-reading-room/driver.mjs smoke          # health + security checks
      node .agents/skills/run-reading-room/driver.mjs term 'echo hi' # run a command in the app's pty
-     node .agents/skills/run-reading-room/driver.mjs shot / out.png # CDP screenshot (closes the tutorial first)
+     node .agents/skills/run-reading-room/driver.mjs shot / out.png # CDP screenshot, 1200x800 @2x (closes the tutorial first)
      node .agents/skills/run-reading-room/driver.mjs stop
 
    No window ever opens (RR_NO_OPEN=1); the server survives idle periods
@@ -106,13 +106,31 @@ async function term(cmd, waitMs = 12000) {
   console.log(out.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[=>]/g, ''));
 }
 
-/* CDP screenshot. Handles the two things that break naive headless shots:
-   (1) --virtual-time-budget never settles on the work-mode page (open WS) and
+/* Screenshot viewport: 1200x800 CSS px at deviceScaleFactor 2 — a retina-crisp
+   2400x1600 PNG, which is what the tutorial/README figures are captured at.
+   Override with RR_SHOT_W / RR_SHOT_H / RR_SHOT_SCALE (positive numbers; anything
+   else falls back to the default for that one value). */
+function shotMetrics() {
+  const num = (name, dflt) => { const v = Number(process.env[name]); return Number.isFinite(v) && v > 0 ? v : dflt; };
+  return {
+    width: Math.round(num('RR_SHOT_W', 1200)),
+    height: Math.round(num('RR_SHOT_H', 800)),
+    deviceScaleFactor: num('RR_SHOT_SCALE', 2),
+    mobile: false,
+  };
+}
+
+/* CDP screenshot. Handles the three things that break naive headless shots:
+   (1) --virtual-time-budget never settles on the app's pages (open WS) and
        hangs with MathJax — so we use real waits over the devtools protocol;
    (2) a fresh profile auto-opens the tutorial modal over everything, and
-       closing it chains into Setup — so we close both before capturing. */
+       closing it chains into Setup — so we close both before capturing;
+   (3) headless Chrome defaults to a 1x viewport of whatever size it likes — so
+       we pin the viewport + device scale via Emulation.setDeviceMetricsOverride
+       (see shotMetrics) and the PNG comes out at width*scale x height*scale. */
 async function shot(target, out, waitMs = 5000) {
   if (!fs.existsSync(CHROME)) die('Google Chrome not found at the expected macOS path');
+  const metrics = shotMetrics();
   let url = target;
   if (!/^(https?|file):/.test(target)) {
     const st = await findServer(); if (!st) die('no server — run `serve` first (or pass a file:// url)');
@@ -122,7 +140,7 @@ async function shot(target, out, waitMs = 5000) {
   const dbgPort = 9222 + Math.floor(Math.random() * 500);
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-shot-'));
   const chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', `--user-data-dir=${profile}`,
-    '--window-size=1280,1500', `--remote-debugging-port=${dbgPort}`, 'about:blank'], { stdio: 'ignore' });
+    `--window-size=${metrics.width},${metrics.height}`, `--remote-debugging-port=${dbgPort}`, 'about:blank'], { stdio: 'ignore' });
   let wsUrl = null;
   for (let i = 0; i < 20 && !wsUrl; i++) {
     await sleep(1000);
@@ -139,6 +157,7 @@ async function shot(target, out, waitMs = 5000) {
   const evaljs = async (expr) => (await send('Runtime.evaluate', { expression: expr, returnByValue: true })).result?.value;
   await new Promise((r) => ws.on('open', r));
   await send('Page.enable');
+  await send('Emulation.setDeviceMetricsOverride', metrics);   // viewport + DPR, before layout
   await send('Page.navigate', { url });
   await sleep(1500);
   await evaljs(`(function(){var x=document.querySelector('#rr-tutorial-modal .rr-modal-x'); if(x&&!document.getElementById('rr-tutorial-modal').hasAttribute('hidden')) x.click();})()`);
@@ -151,7 +170,7 @@ async function shot(target, out, waitMs = 5000) {
   chrome.kill();
   await Promise.race([gone, sleep(3000)]);          // let Chrome release the profile
   try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {} // tmpdir — best effort
-  console.log('saved ' + out);
+  console.log(`saved ${out} (${Math.round(metrics.width * metrics.deviceScaleFactor)}x${Math.round(metrics.height * metrics.deviceScaleFactor)} px)`);
 }
 
 /* Health + security smoke against the running server. */
@@ -204,5 +223,5 @@ else if (cmd === 'smoke') await smoke();
 else if (cmd === 'term') await term(args.join(' ') || 'echo no command given', Number(process.env.RR_TERM_WAIT) || undefined);
 else if (cmd === 'shot') await shot(args[0] || '/', args[1] || 'shot.png', Number(args[2]) || undefined);
 else if (cmd === 'build') build();
-else die('usage: driver.mjs serve | smoke | term <cmd> | shot <page|url> <out.png> [waitMs] | build | stop');
+else die('usage: driver.mjs serve | smoke | term <cmd> | shot <page|url> <out.png> [waitMs] (env RR_SHOT_W/RR_SHOT_H/RR_SHOT_SCALE) | build | stop');
 

@@ -7,23 +7,26 @@ description: "Build a side-by-side comparison page of 2–3 papers already in th
 
 ## Invocation
 
-Invoke explicitly as `$compare <id-or-arxiv> <id-or-arxiv> [<id-or-arxiv>] [--title "..."] [--approve]` in Codex or `/compare <id-or-arxiv> <id-or-arxiv> [<id-or-arxiv>] [--title "..."] [--approve]` in Reading Room work mode. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
+Invoke explicitly as `$compare <id-or-arxiv> <id-or-arxiv> [<id-or-arxiv>] [--title "..."] [--focus "..."] [--approve]` in Codex or `/compare <id-or-arxiv> <id-or-arxiv> [<id-or-arxiv>] [--title "..."] [--focus "..."] [--approve]` in the Reading Room app. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
 
 
 You are building a **comparison** entry in the Reading Room — a side-by-side breakdown of 2–3 papers that are already in the library. Work **interactively** and stop at the gate. Do **not** call an external assistant API or spawn a non-interactive assistant CLI; use the running assistant's current interactive session. Pitch the cells to the reader's profile + field config (`user/profile.json` / `user/config.json`, falling back to repo root / `config.example.json`): assume fluency in their `expertise` and apply `config.tone`.
 
+**Full profile.** If `user/profile.md` exists — the reader's free-form profile (background, current projects, what they want from reports, style preferences), seeded by `/setup` and edited by the reader — read it too, next to `profile.json`. Let it steer which dimensions actually matter to them and how the verdict is pitched (e.g. weigh the axis that bears on their current project). It complements `profile.json` and never overrides a flag on the command line; if it's absent, carry on without it (don't create it here).
+
 ## Input
-The user passed: `$ARGUMENTS` — two or three paper ids (arXiv ids or report slugs), optionally `--title "Custom title"` and `--approve` (skip the gate's wait — post the framing/dimensions for the record and write straight away).
+The user passed: `$ARGUMENTS` — two or three paper ids (arXiv ids or report slugs), optionally `--title "Custom title"`, `--focus "question or topic"` (what to compare them on — e.g. `--focus "which handles long sequences better, and at what cost?"` — the whole comparison is then organised around answering it) and `--approve` (skip the gate's wait — post the framing/dimensions for the record and write straight away).
 
 1. Normalize each id (lowercase, drop an `arXiv:` prefix and any `vN` suffix).
 2. Confirm each one exists at `reports/<id>/digest.json`. If one is **not** in the library, stop and tell the user to run `/explain-paper <id>` first (you compare analyzed papers, not raw PDFs).
 3. Read each paper's `digest.json` (and re-open the PDF in `papers/` if you need detail the digest doesn't carry).
-4. Derive a `slug` for the comparison: from `--title` if given (lowercase, non-alphanumerics → `-`), else join the papers' short names (e.g. `s4-vs-mamba`).
+4. Derive a `slug` for the comparison: from `--title` if given (lowercase, non-alphanumerics → `-`), else join the papers' short names (e.g. `s4-vs-mamba`). When `--focus` was given and no `--title`, let the **title** reflect the question (e.g. `S4 vs. Mamba — which handles long sequences better?`) — the slug can stay the short-names form.
 
 ## Gate — confirm before writing
 Post and **wait for approval**:
 - the papers being compared (title + year) and a one-sentence framing of *why* this comparison is interesting;
 - the **dimensions** (table rows) you'll compare on — 5–9 aspects such as: core idea, key mechanism, complexity, training/inference cost, results & benchmarks, assumptions/limitations, what it's best for. Choose dimensions that actually differentiate these papers.
+- if `--focus` was given: the question restated in one line, and how the framing + dimensions will **answer** it — pick the dimensions that decide that question (not a generic checklist), and plan a verdict that states the answer.
 
 Only continue once the user says go — **unless `--approve` was passed**, in which case post the framing + dimensions for the record and proceed straight to writing without waiting.
 
@@ -37,6 +40,7 @@ Match this schema exactly:
   "papers": ["<id>", "<other-id>"],
   "added": "<today's date, YYYY-MM-DD>",
   "tldr": "One or two sentences on the upshot of the comparison.",
+  "focus": "which handles long sequences better, and at what cost?",
   "dimensions": [
     {"aspect": "Core idea", "cells": ["<html for paper 1>", "<html for paper 2>"]},
     {"aspect": "Complexity", "cells": ["<html>", "<html>"]}
@@ -48,7 +52,8 @@ Match this schema exactly:
 - `papers` order fixes the column order; every `dimensions[].cells` array must be in that same order and the same length (use an empty string for "not applicable").
 - `cells` and `verdict.html` use the **same allowed HTML** as a report: `<p> <h3> <ul> <ol> <li> <strong> <code> <pre> <a> <table>` plus LaTeX (`\\( … \\)`, `\\[ … \\]`); keep cells tight — a few sentences or a short list, not an essay.
 - Be grounded: pull claims/metrics from the digests (or the PDFs); cite section/figure numbers; never invent numbers. Note genuine uncertainty rather than guessing.
-- `verdict` is optional; include it when there's a real "when to use which" takeaway.
+- `focus` — the `--focus` text verbatim, as **plain text** (no HTML tags, no LaTeX — the build escapes it on render; omit the key entirely when none was given; never an empty string). The build renders it as a **Question** callout under the lead, so the comparison must actually answer it: the framing, the chosen dimensions, and the verdict.
+- `verdict` is optional; include it when there's a real "when to use which" takeaway — and **always** when `focus` is set: it's where the question gets its answer, stated plainly in the first sentence.
 
 ## Then build and report back
 Run `python scripts/verify.py --build` (builds, then runs QA; fix any `✗` failures), confirm `compares/<slug>/compare.json` and `docs/compare/<slug>/index.html` were written (and that each compared report now shows the comparison under **Connections → Compared in**), and tell the user to open/refresh `docs/index.html` (the comparison is listed there) or go straight to the compare page.

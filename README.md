@@ -1,10 +1,11 @@
 # Reading Room
 
-A personal, no-API tool for explaining papers. Read a paper **once** in an interactive AI coding session (Claude Code, Codex, or Gemini); it writes a focused, multi-tab HTML report into a searchable catalogue you can open locally or host free on GitHub Pages.
+A personal reading room for papers. Open the app, click **Analyze paper**, paste an arXiv id (or a PDF) — and your own AI coding assistant reads the paper **once** and writes a focused, multi-tab report into a searchable catalogue you own, open locally or host free on GitHub Pages.
 
 **It adapts to you.** A short Setup picks your field(s) and seeds a tag vocabulary + the focus-view tabs each report is split into — both editable, in any discipline (ML/maths, bio, econ/finance, engineering, medicine, …). Each paper is then **divided into the topics that fit *that* paper**, anchored on your defaults and pitched to your profile. Summary and Significance are always written; the rest adapts.
 
-Nothing runs headlessly or via a paid API — generation happens interactively in your normal AI coding session (Claude Code, Codex, or Gemini), covered by your existing subscription. The build is plain Python with **no dependencies**.
+## No API key needed
+Reports are written by **your own AI coding assistant** — [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), Codex CLI, or Gemini CLI — running interactively inside the app, under the subscription you already have. There is **no API key to create, no API billing, no separate account**, and nothing leaves your machine except the assistant's own traffic. The build is plain Python with **no dependencies**.
 
 ## What it looks like
 
@@ -12,45 +13,40 @@ Nothing runs headlessly or via a paid API — generation happens interactively i
 |---|---|
 | ![The catalogue: paper cards with search, tag filters, and reading status](assets/shots/catalogue.png) | ![A report: focus-view tabs, real LaTeX, results tables](assets/shots/report.png) |
 
-<!-- VIDEO PLACEHOLDER: ~60s overview — explain a paper, browse the catalogue -->
-<!-- VIDEO PLACEHOLDER: adaptability — Setup picks fields, custom focus views, per-paper topic division -->
-<!-- VIDEO PLACEHOLDER: work mode — discuss a paper (/learn) + End chat, and /deep-dive -->
+| Analyze a paper, start to finish | The app tour |
+|---|---|
+| ![The one-click Analyze flow: enter a paper, the assistant reads it, the report builds](assets/shots/analyze.gif) | ![The app: catalogue, the flow overlays, and the terminal drawer](assets/shots/apptour.gif) |
 
 ## Setup
-1. **An AI coding assistant — required.** [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), Codex, or Gemini, installed and logged in (its CLI must run from a terminal). Reports are authored in your AI session, covered by your existing subscription — no API key, no separate account.
+1. **An AI coding assistant — required.** [Claude Code](https://docs.claude.com/en/docs/claude-code/overview), Codex CLI, or Gemini CLI, installed and logged in (its CLI must run from a terminal). It is the author of every report, covered by your existing subscription — no API key, no separate account.
 2. **Python 3.8+** and **[Node.js](https://nodejs.org/) 18+** — both free. You never run them yourself; the app uses them under the hood and tells you if one is missing.
 3. **Clone this repository** — paste one line and you're done. It lands in your home folder (a safe spot: not Desktop, not OneDrive — see the first-launch notes) and the folder opens by itself:
    - **macOS** (Terminal): `cd ~ && git clone https://github.com/FrancescoPiatti/Reading-Room.git ReadingRoom && open ReadingRoom`
    - **Windows** (PowerShell): `cd ~; git clone https://github.com/FrancescoPiatti/Reading-Room.git ReadingRoom; explorer ReadingRoom`
 
-   (Forking first, or downloading the ZIP and unzipping to `~/ReadingRoom`, works too.)
-4. **Double-click `ReadingRoom.app`** (macOS) or **`ReadingRoom.bat`** (Windows). The app opens with a short tutorial, hands off to **Setup** (your field, focus views, defaults), and offers to put a **Reading Room shortcut on your Desktop** (or a folder you pick). Its integrated terminal is where your AI runs.
+   (Forking first, or downloading the ZIP and unzipping to `~/ReadingRoom`, works too — but a clone is what makes in-app updates possible.)
+4. **Double-click `ReadingRoom.app`** (macOS) or **`ReadingRoom.bat`** (Windows). The app opens with a short tutorial, hands off to **Setup** (your field, focus views, defaults), and offers to add a **Reading Room shortcut** — on your **Desktop** or in your **Applications folder** (Start Menu on Windows). You can decline ("Not now" on macOS, "Cancel" on Windows); to get the offer again, delete `user/.desktop-shortcut-offered` and relaunch.
 
-Two example papers ship in the catalogue (*Attention Is All You Need* and Hornik's universal-approximation theorem) so the first launch isn't empty and you can see finished reports — keep them, or `/remove <id>` once you've added your own.
-
-**Updating later:** your data never mixes with the app's code — digests live in `reports/`, your settings in `user/` (gitignored) — so `git pull` (or re-downloading) updates the tool without touching your library. `/backup export` zips all of it anytime.
+Two example papers ship in the catalogue (*Attention Is All You Need* and Hornik's universal-approximation theorem) so the first launch isn't empty and you can see finished reports — keep them, or remove them once you've added your own.
 
 ## Use it
-In the app, click **Explain a paper** (the command picker pre-types it into the terminal), or start your AI in the Terminal drawer and type:
+Everything is **one click** in the app — there is no terminal to look at.
 
-```
-/explain-paper 2402.01234              # arXiv id
-/explain-paper https://arxiv.org/abs/2402.01234
-/explain-paper ~/Downloads/paper.pdf   # local file
-```
+- **Analyze paper** (the big button) takes an arXiv id, an arXiv/PDF URL, or a local PDF path — so anything you have a PDF for can go in the catalogue. Your assistant reads the paper, writes the report, the site rebuilds itself, and **Open report** appears when the card is ready.
+- The **▾** next to it switches flow:
+  - **Compare** — pick 2–3 papers (a search box filters the list) and optionally type a **question or topic** ("which handles long sequences better, and at what cost?"); the comparison is then organised around answering it.
+  - **Discuss** — a live conversation about a paper. This is the one flow that opens the terminal, because you talk to it; **End chat** saves the compacted conversation as a Discussion below the reading list.
+  - **Deep dive** — a worked derivation / proof / mechanism trace, added to an existing report as its own "Deep dive" tab or merged into a section you choose.
+- **Stop** — every running flow has a Stop button. Stopping (from the app, or by quitting the assistant in the terminal) discards the run: nothing half-written is added to your library.
+- **Show terminal** reveals the live session if the assistant asks you something, and the app warns you if it goes quiet mid-run.
+- **Back up** (avatar menu) — a **full backup**: one zip with your reports, notes, comparisons, discussions, settings, optionally the downloaded PDFs, *and* your browser reading state (status, stars, collections). Save it to Downloads, the app's `backups/` folder, or a path you choose. **Restore from zip** brings it all back (merge, or replace everything) — this is how you move to a new machine or a fresh copy.
+- **Profile → Edit full profile** (avatar menu) — a free-form Markdown page about you: background, what you're working on, what you want from reports. Every report, comparison, discussion, and deep dive reads it and calibrates to you. **Save & review with assistant** saves it and has your assistant run `/setup --review-profile`: it reads the Markdown and brings `profile.json` / the field config in line with it (surgically, with a "What changed" review).
+- **Assistant settings** (the gear next to the claude / codex / gemini pills, or Terminal ▾ → Assistant settings) — pick the **model** and **reasoning effort** each assistant launches with (Claude Code `--model`/`--effort`, Codex `-m`/`-c model_reasoning_effort=…`, Gemini `-m`). Blank means the CLI's own default; the choices are remembered in this browser and used by every flow button and Terminal ▾ launch.
+- **Updates** (avatar menu) — the app checks for new versions and offers a **one-click update**, whether you cloned with Git (it fetches your clone's remote and fast-forwards; if it can't, your assistant finishes via `/update`) or downloaded the ZIP (it checks the published version on GitHub, downloads the latest ZIP and replaces the app's own files in place). The "Update available" dialog offers **Later** (until the next launch), **Skip this version** (never for that version — a newer one is still offered) and **Update now**. Your library, notes and settings are never touched; if the app's own server files changed it offers a one-click **Restart now**.
+- **Connections** — hollow **ghost nodes** on the graph (references cited by two or more of your papers but not yet read) become actionable: **Analyze** opens the Analyze flow with the id filled in, **Dismiss** hides one for good.
+- Report pages get **View PDF** (opens the paper inside the app) and **Edit notes** (your own notes, rendered under the report); a discussion page gets **Remove discussion**.
 
-It downloads/reads the PDF, shows you a short outline + proposed tags and focus views, and **waits for your approval**. After you say go, it writes the report, the site rebuilds itself, and the new card appears in the catalogue.
-
-**Adding a paper that isn't on arXiv:** `/explain-paper` accepts an arXiv id/URL, a **direct PDF URL**, or a **local PDF path** (e.g. `/explain-paper ~/Downloads/paper.pdf`) — so anything you have a PDF for can go in the catalogue.
-
-## More commands
-- `/compare <id> <id> [<id>]` — a side-by-side comparison page of papers already in the library.
-- `/learn <id> [topic]` — **discuss** a catalogued paper interactively; on **End chat** it compacts the conversation into a Discussion, listed below the reading list (stored like a comparison — never a new paper).
-- `/deep-dive <id> <topic>` — a worked derivation / proof / mechanism trace, as its own "Deep dive" tab or merged into a section you name.
-- `/remove <id>` — delete a paper (digest, notes, PDF, generated page) and rebuild; confirms first.
-- `/refresh-venues` — update preprints to their published venue + BibTeX (DBLP).
-- `/setup` — (re)configure your profile + field(s) (see "Make it yours").
-- Add `--approve` to skip a command's confirmation gate.
+*Prefer a terminal?* Open the **Terminal** drawer (or run `cd workmode && npm start`) and type the commands the buttons run: `/explain-paper <id | url | path.pdf>`, `/compare <id> <id> [<id>] [--focus "…"]`, `/learn <id> [topic]`, `/deep-dive <id> <topic>`, `/remove <id>`, `/refresh-venues` (update preprints to their published venue + BibTeX), `/setup`, `/backup export|import`, `/update`. Add `--approve` to skip a command's confirmation gate.
 
 ## Browse
 `docs/index.html` is the catalogue: client-side search and tag filters, data embedded so it works by double-clicking — no server needed. Each report is a self-contained page with the focus views as tabs and live MathJax equations. Fonts and the search/graph libraries are **self-hosted** inside `docs/assets/` (nothing pings Google or a CDN about what you read, and everything but equation rendering works fully offline; without a connection LaTeX just shows as readable source).
@@ -58,31 +54,29 @@ It downloads/reads the PDF, shows you a short outline + proposed tags and focus 
 ## Host it (optional)
 Push the repo to GitHub, then Settings → Pages → deploy from branch, folder `/docs`. The catalogue is live at your Pages URL. Downloaded PDFs are gitignored; `docs/` is deliberately **committed** — it's what Pages serves.
 
-## The app (work mode)
-The app is the **default way to use Reading Room**: one window with the catalogue, an **integrated AI terminal** (Claude, Codex, or Gemini) in a bottom drawer, and **live rebuilds** — analyze a paper in the terminal and the catalogue/graph refresh themselves. It's a small local server (`workmode/`) bound to loopback only, never exposed to the network. The static site underneath (`docs/`, openable directly or hosted on GitHub Pages) keeps working without it — see "Browse" below.
+## The app, under the hood
+One window with the catalogue, the flow buttons, and an **integrated AI terminal** (Claude Code, Codex CLI, or Gemini CLI) in a bottom drawer, with **live rebuilds** — the catalogue and graph refresh themselves as reports land. It's a small local server (`workmode/`) bound to loopback only, never exposed to the network. The static site underneath (`docs/`, openable directly or hosted on GitHub Pages) keeps working without it — see "Browse".
 
-**Launch it:** double-click **`ReadingRoom.app`** (macOS) or **`ReadingRoom.bat`** (Windows). First run installs deps and **offers to put a "Reading Room" shortcut on your Desktop** (or a folder you pick — you can skip it; to get the offer again later, delete `user/.desktop-shortcut-offered` and relaunch); each launch then starts the server **in the background** and opens a chromeless app window. With `ReadingRoom.app` **no Terminal window appears at all** (errors, if any, show as a dialog). *(Prefer a terminal? `cd workmode && npm start` runs the same server in the foreground with visible logs.)*
+**Launch it:** double-click **`ReadingRoom.app`** (macOS) or **`ReadingRoom.bat`** (Windows). First run installs its dependencies (1–3 minutes, with a notification up front) and makes the shortcut offer; each launch then starts the server **in the background** and opens a chromeless app window. With `ReadingRoom.app` **no Terminal window appears at all** (errors, if any, show as a dialog). *(Alternative: `cd workmode && npm start` runs the same server in the foreground with visible logs.)*
 
 > **macOS first-launch notes.** The app is unsigned, so Gatekeeper may block the first open — right-click the app → **Open** (or run `xattr -d com.apple.quarantine ReadingRoom.app`). **Where the folder lives matters:**
 > - Best: a plain local folder like `~/ReadingRoom` or `~/GitHub/reading-room`.
 > - Desktop / Documents / Downloads / OneDrive / iCloud are **privacy-protected (TCC)**: macOS gates each app's file access there. If double-click does nothing or you see a *"macOS is blocking…"* dialog, grant access once in **System Settings → Privacy & Security** (Files & Folders, or Full Disk Access → **+** → add `ReadingRoom.app`) and open it again. Updating the app can reset this — same 10-second fix.
 > - Cloud-synced folders (OneDrive/iCloud/Dropbox) also **evict file contents to the cloud** ("free up space"); the server then hangs or dies at startup on the placeholder files. If you must keep it there, right-click the folder → **Always Keep on This Device** — but a plain local folder avoids all of this.
 
-In the app, everything is **one click** — no terminal to look at. **Analyze paper** takes an arXiv id, URL, or PDF path and writes the report for you; the ▾ next to it switches to **Compare** (pick 2–3 papers), **Deep dive** (worked derivation into an existing report), or **Discuss** (a live conversation — the one flow that opens the terminal, since you talk to it; **End chat** saves it as a Discussion). Each flow launches your chosen assistant (`claude`, `codex`, or `gemini`) in a hidden session, runs the command, and tells you when the result is ready — a **Show terminal** button reveals the live session if the assistant asks you something, and the app warns you if it goes quiet mid-run. Hollow **ghost nodes** on the Connections graph become actionable (**Analyze** / **Dismiss** / **Keep**); report pages get **View PDF** and **Edit notes** buttons; a discussion page gets **Remove discussion**. The terminal drawer never opens itself — it's there behind the **Terminal** button whenever you want to type commands yourself.
+Each flow launches your chosen assistant (`claude`, `codex`, or `gemini`) in a hidden session, runs the command, and tells you when the result is ready. The terminal drawer never opens itself — it's there behind the **Terminal** button whenever you want to type commands yourself (the ▾ next to it starts an assistant). The app window is chromeless, so external links (e.g. arXiv) open in your normal browser instead of stranding the window. The server runs **headless in the background**; **closing the app window stops it** a few seconds later (so a refresh doesn't kill it). Its output goes to `workmode/workmode.log`, and you can force-stop it with `kill $(cat workmode/workmode.pid)` (macOS) or via Activity Monitor / Task Manager. Set `RR_KEEPALIVE=1` to keep it running after the window closes, or `RR_PORT=5000` to change the port. An in-app update restarts the server for you (the launchers relaunch it automatically; if you started it with `npm start`, just run it again).
 
-The app window is chromeless, so external links (e.g. arXiv) open in your normal browser instead of stranding the window. The server runs **headless in the background** (no Terminal window). **Closing the app window stops it** a few seconds later (so a refresh doesn't kill it); its output goes to `workmode/workmode.log`, and you can force-stop it with `kill $(cat workmode/workmode.pid)` (macOS) or via Activity Monitor / Task Manager. Set `RR_KEEPALIVE=1` to keep it running after the window closes, or `RR_PORT=5000` to change the port. The reading queue and ghost nodes offer **Analyze / Dismiss / Keep**, and report pages get a **View PDF** button — *View PDF* opens the analyzed paper **inside the app** (the local `papers/<id>.pdf`, or proxied from arXiv through the local server) with a **Back** button, so you never leave the window. Ghost papers aren't downloaded, so they have no *View PDF*.
-
-**Works on macOS and Windows.** `ReadingRoom.app` (macOS) and `ReadingRoom.bat` (Windows) are equivalent; the server, UI, live rebuild, and ghost/queue actions are all cross-platform. On macOS the launcher carries a custom icon — if cloud sync ever strips it, `bash assets/build-icon.sh` reinstalls it.
+**Works on macOS and Windows.** `ReadingRoom.app` (macOS) and `ReadingRoom.bat` (Windows) are equivalent; the server, UI, live rebuild, flows, backup, and updates are all cross-platform. On macOS the launcher carries a custom icon — if cloud sync ever strips it, `bash assets/build-icon.sh` reinstalls it.
 
 **A note on the terminal component:** the integrated terminal uses `node-pty`, which installs a prebuilt binary when one exists for your Node version, otherwise compiles it — that needs a C/C++ toolchain (macOS: `xcode-select --install`; Windows: "Desktop development with C++" Build Tools). If it can't build, everything except the terminal still works.
 
 ## Make it yours
-- **Profile & setup**: the **avatar** in the header opens **Profile** and **Setup** — a short questionnaire for your name, field(s), default focus views (**add your own**), tag vocabulary, and depth/audience. In work mode, finishing auto-runs `/setup`, which writes `user/profile.json` + `user/config.json`; the commands read those at runtime, so reports adapt **without editing any command files**. Config lives under `user/` (gitignored), so app updates never overwrite it.
+- **Profile & setup**: the **avatar** in the header opens **Profile** and **Setup** — a short questionnaire for your name, field(s), default focus views (**add your own**), tag vocabulary, and depth/audience. Finishing runs `/setup` for you, which writes `user/profile.json` + `user/config.json` and seeds `user/profile.md`; the commands read those at runtime, so reports adapt **without editing any command files**. **Edit full profile** (in the Profile view) lets you write as much as you like about yourself in Markdown. Config lives under `user/` (gitignored), so app updates never overwrite it.
 - **Fields & focus views**: choose discipline packs or edit your own in Setup (or `user/config.json`) — tag vocabulary, focus-view tabs, lens, and tone. The shipped default is a general, math-derived vocabulary; make it yours. Each report still adapts its sections to the paper at hand.
 - **Rename the site**: set `"site_title": "My Reading Room"` in `user/config.json` — the header, page titles, and footer all follow. (The repository may be published under a different name; the app inside is whatever you call it.)
 - **Restyle**: everything visual lives in `templates/base.css`; rebuild to apply.
-- **Reading status & priority**: each report and the Library page let you set status (to-read / reading / read) and a 0–3 star priority; choices persist in your browser (`localStorage`).
-- **Go deeper**: `/deep-dive <id> <topic>` adds a worked derivation as a "Deep dive" tab or merges it into a section; `/learn <id>` discusses a paper and saves the compacted chat as a Discussion below the reading list.
+- **Reading status & priority**: each report and the Library page let you set status (to-read / reading / read) and a 0–3 star priority, plus free-form **collections**; choices persist in your browser and travel with the full backup.
+- **Go deeper**: **Deep dive** adds a worked derivation as a "Deep dive" tab or merges it into a section; **Discuss** talks a paper through and saves the compacted chat as a Discussion below the reading list.
 
 ### Configuration reference — `user/config.json`
 Setup writes this for you; every key is optional and hand-editable:

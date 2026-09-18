@@ -7,7 +7,7 @@ description: "Remove a paper from the Reading Room — delete its digest, notes,
 
 ## Invocation
 
-Invoke explicitly as `$remove <id-or-arxiv> [--approve]` in Codex or `/remove <id-or-arxiv> [--approve]` in Reading Room work mode. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
+Invoke explicitly as `$remove <id-or-arxiv> [--approve]` in Codex or `/remove <id-or-arxiv> [--approve]` in the Reading Room app. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
 
 
 You are removing one entry from the Reading Room catalogue. This deletes the paper's source-of-truth files and its generated pages, then rebuilds. Work **interactively**; do **not** use an external assistant API or a non-interactive assistant CLI.

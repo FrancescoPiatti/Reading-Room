@@ -166,7 +166,7 @@ function render(){
   if (list.length === 0) {
     emptyEl.hidden = false;
     emptyEl.innerHTML = LIBRARY.length === 0
-      ? 'No papers yet — add one with <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant (Claude, Codex, or Gemini) — it builds the page for you.'
+      ? 'No papers yet — add one with the <b>Analyze paper</b> button in the app (or <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant) — the page builds itself.'
       : (activeCollection ? 'No papers in this collection match that.' : 'No papers match that.');
   } else {
     emptyEl.hidden = true;

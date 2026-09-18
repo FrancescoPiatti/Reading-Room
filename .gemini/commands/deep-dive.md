@@ -16,6 +16,8 @@ You are adding an **incremental deep dive** (a full worked derivation, proof wal
 ## Purpose — how a deep dive differs from the digest
 The digest's lens view (key `math`; see the field config `user/config.json` for the field's framing/title and `config.lens`/`config.tone`) gives the core logic at reference depth. A deep dive goes a level lower on **one** thing the user names — the field's core artifact: every step of a proof or full derivation with the algebra shown (maths), a careful identification argument (econ), an assay/protocol and statistical-validity walkthrough (bio), a concrete worked example, or a mechanism trace. Pitch it to the reader's profile (assume fluency in their expertise) and `config.tone`. Default `--depth deep`.
 
+**Reader's profile.** Read `user/profile.json` (expertise, defaults) and, when it exists, `user/profile.md` — the reader's free-form full profile (background, current projects, what they want from reports, style preferences), seeded by `/setup` and edited by the reader. Use it to decide how much to spell out and which steps deserve the most care (e.g. the parts closest to their own work); it complements `profile.json` and never overrides the flags or the topic they named. If it's absent, carry on without it (don't create it here).
+
 ## Gate — confirm before writing
 Post and **wait for approval**:
 - the paper and the exact topic you'll deep-dive;

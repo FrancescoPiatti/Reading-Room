@@ -7,10 +7,17 @@ description: "Set up (or update) your Reading Room profile and field config so r
 
 ## Invocation
 
-Invoke explicitly as `$setup [free text, e.g. "bio PhD; deep methods; audience peer"]   (or run it after Setup in the app)` in Codex or `/setup [free text, e.g. "bio PhD; deep methods; audience peer"]   (or run it after Setup in the app)` in Reading Room work mode. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
+Invoke explicitly as `$setup [free text, e.g. "bio PhD; deep methods; audience peer"] [--review-profile]   (or run it after Setup in the app)` in Codex or `/setup [free text, e.g. "bio PhD; deep methods; audience peer"] [--review-profile]   (or run it after Setup in the app)` in the Reading Room app. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
 
 
 You are running the reader's **setup**: capture their profile + discipline and write `user/profile.json` and `user/config.json`, so the commands — which read these at runtime — tailor every report to the right field and level. Work **interactively**; do **not** use an external assistant API or a non-interactive assistant CLI. Everything you write goes under `user/` (gitignored, so app updates never overwrite it); fall back to the repo root only on an un-migrated repo, and create `user/` if it doesn't exist.
+
+## 0. `--review-profile` — reconcile the config with the reader's full profile
+The app's profile editor (avatar menu → Profile → **Edit full profile** → **Save & review with assistant**) runs `/setup --review-profile` after the reader edited **`user/profile.md`**. In this mode the Markdown file is the source of truth they just wrote — do **not** ask the questionnaire questions and do **not** rewrite the file:
+1. Read `user/profile.md` in full, plus the current `user/profile.json` and `user/config.json` (resolve the active fields/tags/sections as in §1.5).
+2. Derive what the profile states or clearly implies: name, role, affiliation, expertise, interests, a tagline, report defaults (`depth` / `audience` / `views` — only if the text actually says so), and the discipline (which `templates/fields/*.json` pack(s) fit — only change `fields` when the profile makes it unambiguous).
+3. Apply **surgically** (the §1.5 delta rules): update only the JSON fields the profile supports, keep everything else, never reset custom tags/views. If the profile contradicts the current config (e.g. it says "biologist" but `fields` is `["ml"]`), follow the profile and say so in the review. If something is genuinely ambiguous, ask **one** short question rather than guessing.
+4. Rebuild (`python scripts/verify.py --build`) and give the single **final review** (§5) leading with **What changed** (old → new). If nothing needed changing, say that in one line.
 
 ## 1. Get the intended profile + field
 Two entry points:
@@ -25,6 +32,7 @@ If a previous setup exists **and it isn't the factory default** — `user/profil
 - After collecting the new answers, build a short **delta** — old → new for every changed item (field packs, depth/audience/views, tags added/removed, custom sections, profile fields) — and apply it **surgically**: keep everything the reader didn't change (never reset custom tags, sections, or views that still apply).
 - Call out consequences where the delta has any: e.g. a narrowed tag vocabulary makes existing digests fail verification (tags outside the new active set) — name the affected papers; a removed view stops rendering on every report that carries it.
 - The **final review (§5) must lead with a "What changed" list** (the delta), then the resulting setup.
+- An existing **`user/profile.md`** (the full profile, §3.5) is **never rewritten** by a re-run — it's the reader's own document. If the new answers make it look stale, say so in the review and point them to where they can edit it.
 
 First-time setup — no `user/` config yet, or one byte-equivalent to the shipped examples — has nothing to compare: skip this section entirely.
 
@@ -49,10 +57,28 @@ If the reader wants a **custom** vocabulary or views, expand to the resolved for
 ```
 If the intake carries a **`tags`** list, the reader edited the vocabulary — write it as `config.tags` (it overrides the packs' vocabulary; `scripts/verify.py` validates digests against it). If the intake carries a **`sections`** list, the reader added custom focus view(s) — write it as `config.sections` (the **full** list: the field's sections *plus* the custom ones, each `{key, title}`). You can keep `fields` alongside an explicit `tags`/`sections`: the loader's **base-wins merge** uses your explicit values and still takes lens/tone (and any unset piece) from the pack, so you don't freeze the whole config. If neither is present, write only `fields` and let the build merge the packs at load time (don't freeze a copy). Multiple fields = union of their vocabularies + a superset of sections, **in the order listed**: tags union in pack order, and each section key takes its title from the *first* pack that declares it — so put the reader's primary field first. Keep existing section **keys** stable (`summary`/`math`/`architecture`/`results`/`significance`/`reproducibility`) — only titles change per field; a custom view just needs a **new** key (adding keys is safe, only renaming an existing one blanks a tab). Write it directly — no approval step.
 
+## 3.5 Seed `user/profile.md` — the full profile (only if absent)
+`user/profile.json` holds the structured fields; **`user/profile.md`** is the reader's **full profile** in free-form Markdown — background, current projects, what they want from reports, style preferences. The commands (`/explain-paper`, `/compare`, `/learn`, `/deep-dive`) read it when present, next to `profile.json`, to calibrate every report beyond the JSON. **If it does not exist, seed it now** from the answers (intake or terminal), with exactly these headings:
+```markdown
+# <name>
+
+## Background
+<role, affiliation, expertise — a sentence or two, in prose>
+
+## What I'm working on
+<interests / current projects, in the reader's own words where you have them>
+
+## What I want from reports
+<the depth / audience / views defaults in words, plus anything they said about focus, style, or what to skip>
+```
+Write only what you actually have — a heading with a one-line placeholder (e.g. *(fill in)*) is fine for the rest. **Never overwrite an existing `user/profile.md`**: on a re-run leave it exactly as it is, even if the profile answers changed (§1.5). No approval step — seeding it is part of applying the setup.
+
+Tell the reader (in §5) that they can edit it any time from the app's **avatar menu → Profile → "Edit full profile"** (a full-screen editor) or in the terminal / any text editor — the commands pick up the new text on their next run.
+
 ## 4. Do NOT edit the workflow files (except a genuine last resort)
 The commands **read `user/config.json` and `user/profile.json` at runtime** — they pick up the field's tags, focus-view titles, lens, tone, and the reader's defaults/expertise automatically. So in the normal case **no command-file edit is needed** — this is deliberate: keeping customization in config (not in edited `.md` files) means app updates never clash with it, and the reader never has to review agent edits.
 
 Only if the field config genuinely can't express something: make the **smallest possible** edit yourself (prefer `.agents/skills/explain-paper/SKILL.md`), never restructuring or rewording beyond that one change — and simply **note it in the final review (§5)**. Do not gate it behind per-edit approval; the reader sees it in the summary, nothing more.
 
 ## 5. Clean up, build, and show ONE final review
-Delete the intake file if it was used. Run `python scripts/verify.py --build` and fix any `✗` failures. Then show a **single, concise review** of the result (the reader's only touchpoint): the resulting profile (name/role/field/defaults), the active tag vocabulary + focus views their reports will use, and — if you had to touch a command file at all — a one-line note of what and why. Close by telling them they can re-run `/setup` any time to adjust. Offer to remember the profile for future sessions if useful.
+Delete the intake file if it was used. Run `python scripts/verify.py --build` and fix any `✗` failures. Then show a **single, concise review** of the result (the reader's only touchpoint): the resulting profile (name/role/field/defaults), the full profile's path (`user/profile.md` — seeded now, or left as it was — editable from the app's avatar menu → Profile → "Edit full profile", or in the terminal), the active tag vocabulary + focus views their reports will use, and — if you had to touch a command file at all — a one-line note of what and why. Close by telling them they can re-run `/setup` any time to adjust. Offer to remember the profile for future sessions if useful.

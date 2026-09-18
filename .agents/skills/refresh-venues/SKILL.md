@@ -7,7 +7,7 @@ description: "Check every catalogued paper still marked as an arXiv preprint to 
 
 ## Invocation
 
-Invoke explicitly as `$refresh-venues [<id> ...]   (optional; default: scan all preprints)` in Codex or `/refresh-venues [<id> ...]   (optional; default: scan all preprints)` in Reading Room work mode. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
+Invoke explicitly as `$refresh-venues [<id> ...]   (optional; default: scan all preprints)` in Codex or `/refresh-venues [<id> ...]   (optional; default: scan all preprints)` in the Reading Room app. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
 
 
 You are running a maintenance pass over the Reading Room: find papers whose citation is still the **arXiv preprint** and, for any that have since appeared at a venue, update the digest so the venue and exported BibTeX become the published conference/journal entry. The arXiv link (`source_url`) always stays. Work **interactively**; do **not** use an external assistant API or a non-interactive assistant CLI.

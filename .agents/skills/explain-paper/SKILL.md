@@ -7,7 +7,7 @@ description: "Read a paper (arXiv id, URL, or local PDF path) and produce a focu
 
 ## Invocation
 
-Invoke explicitly as `$explain-paper <arxiv-id | arxiv-url | path/to/paper.pdf> [--views a,b,c] [--depth skim|standard|deep] [--audience peer|newcomer] [--focus "..."] [--approve]` in Codex or `/explain-paper <arxiv-id | arxiv-url | path/to/paper.pdf> [--views a,b,c] [--depth skim|standard|deep] [--audience peer|newcomer] [--focus "..."] [--approve]` in Reading Room work mode. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
+Invoke explicitly as `$explain-paper <arxiv-id | arxiv-url | path/to/paper.pdf> [--views a,b,c] [--depth skim|standard|deep] [--audience peer|newcomer] [--focus "..."] [--approve]` in Codex or `/explain-paper <arxiv-id | arxiv-url | path/to/paper.pdf> [--views a,b,c] [--depth skim|standard|deep] [--audience peer|newcomer] [--focus "..."] [--approve]` in the Reading Room app. In the workflow below, `$ARGUMENTS` means all text supplied after the skill or command name; never treat it as a literal value.
 
 
 You are building one entry in a personal "Reading Room" — a catalogue of focused paper breakdowns. Work **interactively** and stop at the approval gate below. Do **not** call an external assistant API or spawn a non-interactive assistant CLI; this runs inside the running assistant's current interactive session.
@@ -26,6 +26,8 @@ Then **read the PDF** directly with the running assistant's PDF-capable file rea
 ## Options (parse these from `$ARGUMENTS`, after the id/url/path)
 All optional — fall back to the defaults if absent, and confirm your reading of them at Gate 1. If a profile exists (`user/profile.json`, else legacy `profile.json`), take unset defaults from it: `defaults.depth`, `defaults.audience`, `defaults.views`, and use the reader's `expertise` to calibrate how much background to spell out (assume fluency in their listed areas).
 
+**Full profile.** If `user/profile.md` exists, read it as well — it is the reader's free-form profile (background, current projects, what they want from reports, style preferences), seeded by `/setup` and edited by the reader. Use it to calibrate beyond the JSON fields: what to spell out vs. assume, which threads of the paper matter for their current work, and the style they asked for. It never overrides an explicit option on the command line, and it's optional — if absent, carry on with `profile.json` alone (don't create it here; `/setup` seeds it).
+
 **Read the field config** (`user/config.json`, falling back to `config.example.json`) and tailor the report to the reader's discipline — do **not** assume ML/maths. If the config has only a `fields` array, resolve it by reading the named `templates/fields/<field>.json` pack(s) — that's the source of `tags`/`sections`/`lens`/`tone`. Use `config.tags` as the controlled tag vocabulary, `config.sections` for the focus-view keys/titles, **over-invest in the field's lens view** (`config.lens`, key `config.lens_key`), and apply `config.tone`. (The section *keys* are stable — `summary`, `math`, `architecture`, `results`, `significance`, `reproducibility` — but each field gives them its own *titles*, e.g. `math` is titled "Methods & statistics" for biology. Write the keys; the build applies the titles.)
 - **`--views a,b,c`** (B1) — only author these focus sections (keys from the schema, e.g. `--views summary,math,results`). Default: every section that's relevant. Omit any section you're not writing — never emit an empty one.
 - **`--depth skim|standard|deep`** (B2) — controls length/detail. `skim` = tight, headline-level; `standard` = the usual; `deep` = thorough, over-invest in the field's lens view (`config.lens_key`, e.g. `math`). Default `standard`.
@@ -38,7 +40,7 @@ While reading, build the paper's `cites` list (see schema) so the catalogue's co
 - Go through the references section. For each reference that is **important to this paper** (its direct lineage, key baselines, the methods it builds on — not every incidental citation), capture its **arXiv id** and **title**.
 - Normalize each id: lowercase, drop any `arXiv:` prefix and any version suffix (`1706.03762v5` → `1706.03762`).
 - Match against the existing library: list `reports/` — a reference whose id has a folder there is already analyzed and its edge resolves automatically.
-- Also include important references that are **not** yet in the library. They surface as a reading queue, and become graph nodes once two of your papers cite them (or you analyze them). Skip references with no arXiv id (or note them in prose only).
+- Also include important references that are **not** yet in the library. They are listed in the Connections reading queue and drawn as hollow graph nodes once **two** of your papers cite them (or you analyze them); a reference cited by only this paper is recorded in `cites` but not surfaced yet. Skip references with no arXiv id (or note them in prose only).
 
 ## Plan the section division (skim first, then adapt)
 Before drafting, **skim the whole paper** (abstract, section headings, figures, results, conclusion) to see how it is actually organised. Then design *this paper's* focus views by **starting from the reader's default `config.sections`** (what they chose at setup) and adapting to fit the paper:
@@ -55,7 +57,7 @@ Post a short outline and **wait for the user to approve or adjust**:
 - title, authors, venue/year, and your one-sentence TL;DR
 - 2–4 proposed `tags`, chosen ONLY from the controlled vocabulary below (these power catalogue/library search, filter, and grouping)
 - the **section plan** from the step above: which focus views you'll write, which you'll skip (one phrase each on why), and any paper-specific custom view — always including `summary` + `significance`. (Respect any `--views`/`--focus`.)
-- the key `cites` you found (which are already in the library vs. new to the reading queue)
+- the key `cites` you found (which are already in the library vs. external — note that an external reference only reaches the reading queue once a second paper cites it)
 - how you read any `--depth` / `--audience` / `--focus` options
 
 Only continue once the user says go — **unless `--approve` was passed**, in which case post the outline for the record and proceed straight to writing without waiting.

@@ -577,6 +577,15 @@ mjx-container[display="true"] { margin: 0.6em 0 1.1em; }
   background: var(--bg-raised); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
 }
 .cpill:hover { border-color: var(--accent); color: var(--ink); text-decoration: none; }
+/* the guiding question/topic (`--focus`): a subtle tinted callout under the lead.
+   Tokens only, so light and dark themes are both covered. */
+.c-focus {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px;
+  margin: 18px 0 0; padding: 12px 16px;
+  background: var(--accent-dim); border: 1px solid var(--line); border-radius: 8px;
+  font-size: 15.5px; line-height: 1.55; color: var(--ink);
+}
+.c-focus .k { font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); white-space: nowrap; }
 .ctable-wrap { overflow-x: auto; margin: 8px 0 24px; }
 .ctable { width: 100%; border-collapse: collapse; font-size: 15px; }
 .ctable th, .ctable td {
@@ -956,7 +965,7 @@ body.rr-modal-open { overflow: hidden; }
 
 <script src="assets/vendor/d3.min.js"></script>
 <script>
-const GRAPH = {"nodes": [{"id": "1706.03762", "label": "Attention Is All You Need", "type": "paper", "url": "papers/1706.03762/index.html", "tag": "deep-learning", "indegree": 0, "year": 2017, "authors": "Ashish Vaswani et al."}, {"id": "hornik1989", "label": "Multilayer Feedforward Networks are Universal Approximators", "type": "paper", "url": "papers/hornik1989/index.html", "tag": "deep-learning", "indegree": 0, "year": 1989, "authors": "Kurt Hornik, Maxwell Stinchcombe, Halbert White"}], "links": [], "queue": [{"id": "1409.0473", "title": "Neural Machine Translation by Jointly Learning to Align and Translate", "cited_by": 1, "in_graph": false}, {"id": "1409.3215", "title": "Sequence to Sequence Learning with Neural Networks", "cited_by": 1, "in_graph": false}, {"id": "1512.03385", "title": "Deep Residual Learning for Image Recognition", "cited_by": 1, "in_graph": false}, {"id": "1607.06450", "title": "Layer Normalization", "cited_by": 1, "in_graph": false}, {"id": "1609.08144", "title": "Google's Neural Machine Translation System", "cited_by": 1, "in_graph": false}], "tags": ["deep-learning"]};
+const GRAPH = {"nodes": [{"id": "1706.03762", "label": "Attention Is All You Need", "type": "paper", "url": "papers/1706.03762/index.html", "tag": "deep-learning", "indegree": 0, "year": 2017, "authors": "Ashish Vaswani et al."}, {"id": "hornik1989", "label": "Multilayer Feedforward Networks are Universal Approximators", "type": "paper", "url": "papers/hornik1989/index.html", "tag": "deep-learning", "indegree": 0, "year": 1989, "authors": "Kurt Hornik, Maxwell Stinchcombe, Halbert White"}], "links": [], "queue": [], "tags": ["deep-learning"]};
 
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function trunc(s, n){ s = String(s||''); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
@@ -973,9 +982,9 @@ if (!GRAPH.links.length){
   emptyEl.hidden = false;
   if (GRAPH.nodes.length) emptyEl.classList.add('stage-empty--footer');  // don't overlap drawn nodes
   emptyEl.innerHTML = GRAPH.nodes.length === 0
-    ? 'No papers yet — add your first with <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant (Claude, Codex, or Gemini).'
+    ? 'No papers yet — add your first with the <b>Analyze paper</b> button in the app (or <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant).'
     : GRAPH.nodes.length === 1
-    ? 'One paper so far. Connections appear once papers in your library cite each other — analyze one of its references (see the reading queue below) to draw the first edge.'
+    ? 'One paper so far. Connections appear once papers in your library cite each other — analyze one of its references to draw the first edge.'
     : 'No internal citations yet. Edges appear when one analyzed paper cites another (or two share a reference).';
 }
 
@@ -1120,7 +1129,7 @@ window.addEventListener('resize', resize);
 const queueEl = document.getElementById('queue');
 if (GRAPH.queue.length){
   queueEl.innerHTML = '<h2>Reading queue</h2>'
-    + '<p class="sub">References cited by your library that you haven’t analyzed yet — most-cited first. Two or more citations promotes a reference into the graph above.</p>'
+    + '<p class="sub">References cited by two or more of your papers that you haven’t analyzed yet — most-cited first. Each one is also drawn as a hollow node in the graph above.</p>'
     + '<ul class="qlist">' + GRAPH.queue.map(q => {
         const title = q.title ? esc(q.title) : '<em>untitled reference</em>';
         return `<li class="qitem">
@@ -1128,6 +1137,9 @@ if (GRAPH.queue.length){
           <span class="q-title"><a href="https://arxiv.org/abs/${esc(q.id)}">${title}</a><span class="q-id">${esc(q.id)}</span></span>
         </li>`;
       }).join('') + '</ul>';
+} else if (papers) {
+  queueEl.innerHTML = '<h2>Reading queue</h2>'
+    + '<p class="sub">Nothing queued yet. A reference is listed here once two or more of your papers cite it — so the queue fills up as your library grows.</p>';
 }
 
 /* ---- theme toggle ---- */
@@ -1446,22 +1458,62 @@ if (GRAPH.queue.length){
 </script>
 
 <footer class="rr-credit">Reading Room · created by <strong>Francesco Piatti</strong> · &copy; 2026 Francesco Piatti</footer><!-- ===========================================================================
-  account.html — avatar menu + Profile / Setup modals.
+  account.html — avatar menu + Profile / Setup / Back up / Tutorial modals.
 
   PURELY ADDITIVE. scripts/build.py's finalize_page() injects this at the end of the page
   body on every rendered page, and injects the avatar button (.rr-acct-btn) next to the theme
-  toggle in the topbar. Styling uses ONLY base.css tokens, so it themes light/dark
-  for free. {"defaults": {"depth": "standard", "audience": "peer", "views": []}} / [{"key": "summary", "title": "Summary"}, {"key": "math", "title": "Method & math"}, {"key": "architecture", "title": "Architecture"}, {"key": "results", "title": "Results"}, {"key": "significance", "title": "Novelty & significance"}, {"key": "reproducibility", "title": "Reproducibility"}] are filled in by
-  scripts/build.py (embedded JS literals, with the </ guard).
+  toggle in the topbar. Styling composes from base.css tokens (plus the small <style> block
+  below for the parts base.css doesn't cover), so it themes light/dark for free. The
+  ACCOUNT_PROFILE_JSON / ACCOUNT_SECTIONS_JSON / ACCOUNT_FIELDS_JSON placeholders are filled
+  in by scripts/build.py (embedded JS literals, with the </ guard).
 
-  • Profile  — a blurred-backdrop modal showing the current profile.json (read-only).
+  The app's local server (workmode/server.js) injects window.RR_WORKMODE AFTER this fragment,
+  so every app-only bit here is decided on DOMContentLoaded or at click time, never at parse.
+
+  • Profile  — a blurred-backdrop modal showing the current profile.json (read-only). Under
+               the app it also shows an excerpt of user/profile.md (GET /api/profile-md) and
+               an "Edit full profile" button that hands off to window.RR_editProfile().
   • Setup    — a blurred-backdrop questionnaire (Back/Next; no terminal) pre-filled
                from the profile. Near the end it offers Launch claude / codex / gemini,
-               then Finish. In work mode (RR_WORKMODE) Finish POSTs the answers to
-               /api/setup-intake and pre-types /setup in the integrated terminal, where
-               the agent confirms each change. On the static site it degrades to a
+               then Finish. Under the app Finish POSTs the answers to /api/setup-intake and
+               runs /setup in the integrated terminal. On the static site it degrades to a
                copyable profile + instructions.
+  • Back up  — browser reading state as JSON (always); under the app also a full zip
+               export / restore of everything on disk (/api/backup/*, wrapping scripts/archive.py).
+  • Tutorial — the stepped first-run walkthrough (real screenshots / GIFs from assets/shots/).
+  • Updates  — menu item added under the app only; calls window.RR_openUpdates(true)
+               (the update modal itself lives in workmode.js).
 =========================================================================== -->
+<style>
+/* account.html additions — the app-only Back up / Profile bits that base.css doesn't cover.
+   Composes from the base.css tokens; the one new color is a token too (light default,
+   [data-theme="dark"] override) so both themes stay complete. */
+:root { --rr-danger: #b42318; }
+[data-theme="dark"] { --rr-danger: #ff8f85; }
+.rr-bk-sec[hidden] { display: none; }
+.rr-bk-sec:not([hidden]) ~ .rr-bk-sec:not([hidden]) { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 16px; }  /* rule only between VISIBLE sections (hidden app-only ones still count for `+`) */
+.rr-bk-h { margin: 0 0 6px; font-family: var(--serif); font-size: 17px; font-weight: 560; color: var(--ink); }
+.rr-bk-counts { font-family: var(--mono); font-size: 12px; }
+.rr-bk-counts:empty { display: none; }
+.rr-bk-label { margin: 12px 0 6px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+.rr-bk-opts { display: flex; flex-direction: column; gap: 8px; }
+.rr-bk-opts .rr-q-choice { padding: 7px 10px; font-size: 13.5px; }
+.rr-bk-opts .rr-q-choice input { flex: none; accent-color: var(--accent); }
+.rr-bk-sub { margin-left: auto; padding-left: 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 58%; }
+.rr-bk-sub:empty { display: none; }
+.rr-bk-custom { margin-top: 8px; font-family: var(--mono); font-size: 13px; }
+.rr-bk-custom[hidden] { display: none; }
+.rr-bk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.rr-bk-row .rr-q-note { margin: 0; flex: 1 1 100%; line-height: 1.5; word-break: break-word; }
+.rr-bk-row .rr-q-note[hidden] { display: none; }
+.rr-bk-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rr-bk-warn { color: var(--rr-danger); }
+.rr-prof-md { padding-top: 12px; }
+.rr-prof-md .rr-k { display: block; width: auto; margin-bottom: 6px; }
+.rr-prof-md-x { margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--ink-soft); white-space: pre-wrap; word-break: break-word; background: var(--bg-raised); border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; max-height: 170px; overflow: auto; }
+.rr-prof-md-x.rr-muted { color: var(--ink-faint); }
+#rr-profile-editmd[hidden] { display: none; }
+</style>
 <div class="rr-acct-menu" id="rr-acct-menu" role="menu" aria-label="Account" hidden>
   <button type="button" class="rr-acct-item" data-acct="tutorial" role="menuitem">Tutorial</button>
   <button type="button" class="rr-acct-item" data-acct="profile" role="menuitem">Profile</button>
@@ -1480,6 +1532,7 @@ if (GRAPH.queue.length){
     <div class="rr-modal-foot">
       <span class="rr-spacer"></span>
       <button type="button" class="rr-btn rr-btn-ghost" data-rr-close>Close</button>
+      <button type="button" class="rr-btn rr-btn-ghost" id="rr-profile-editmd" hidden>Edit full profile</button>
       <button type="button" class="rr-btn" id="rr-profile-edit">Edit in Setup &rarr;</button>
     </div>
   </div>
@@ -1517,16 +1570,56 @@ if (GRAPH.queue.length){
       <button type="button" class="rr-modal-x" data-rr-close aria-label="Close">&#10005;</button>
     </div>
     <div class="rr-modal-body">
-      <p class="rr-q-hint">Your <b>reading status</b>, <b>priority stars</b>, <b>custom tags / collections</b>, dismissed graph nodes, and theme are stored in this browser only. Export them to a small JSON file to move them to another browser or device, or as a backup.</p>
-      <p class="rr-q-hint">Your analysed papers, comparisons and discussions are files on disk — back those up with <code>/backup export</code> (or <code>python scripts/archive.py export</code>), which writes a full zip.</p>
-      <p class="rr-q-note" id="rr-backup-msg" hidden></p>
-    </div>
-    <div class="rr-modal-foot">
-      <span class="rr-backup-count rr-setup-step" id="rr-backup-count"></span>
-      <span class="rr-spacer"></span>
-      <button type="button" class="rr-btn rr-btn-ghost" id="rr-backup-import">Import…</button>
-      <button type="button" class="rr-btn" id="rr-backup-export">Export</button>
-      <input type="file" id="rr-backup-file" accept="application/json,.json" hidden>
+      <!-- App only (RR_WORKMODE): full zip export / restore through the server's /api/backup/*
+           routes (scripts/archive.py). Both sections stay hidden on the static site; the JSON
+           reading-state section at the bottom is always shown. -->
+      <section class="rr-bk-sec" id="rr-backup-zip" hidden>
+        <h3 class="rr-bk-h">Full backup (zip)</h3>
+        <p class="rr-q-hint">One zip with everything on disk — analysed papers and notes, comparisons, discussions, your profile and settings — plus this browser’s reading state (status, stars, collections), so it restores completely on any copy of Reading Room.</p>
+        <p class="rr-q-hint rr-bk-counts" id="rr-backup-zip-counts"></p>
+        <div class="rr-bk-opts">
+          <label class="rr-q-choice"><input type="checkbox" id="rr-backup-pdfs" checked> Include downloaded PDFs <span class="rr-bk-sub">untick to keep the zip small</span></label>
+        </div>
+        <p class="rr-bk-label">Save to</p>
+        <div class="rr-bk-opts" id="rr-backup-dest">
+          <label class="rr-q-choice"><input type="radio" name="rr-backup-dest" value="downloads" checked> Downloads folder <span class="rr-bk-sub" id="rr-backup-dl-path"></span></label>
+          <label class="rr-q-choice"><input type="radio" name="rr-backup-dest" value="backups"> The app’s backups folder <span class="rr-bk-sub" id="rr-backup-bk-path"></span></label>
+          <label class="rr-q-choice"><input type="radio" name="rr-backup-dest" value="custom"> Custom path…</label>
+        </div>
+        <input class="rr-q-input rr-bk-custom" id="rr-backup-custom" type="text" placeholder="/full/path/to/a/folder — or …/my-backup.zip" spellcheck="false" hidden>
+        <div class="rr-bk-row">
+          <button type="button" class="rr-btn" id="rr-backup-zip-export">Export zip</button>
+          <button type="button" class="rr-btn rr-btn-ghost" id="rr-backup-zip-reveal" hidden>Show in folder</button>
+          <p class="rr-q-note" id="rr-backup-zip-msg" hidden></p>
+        </div>
+      </section>
+      <section class="rr-bk-sec" id="rr-backup-restore" hidden>
+        <h3 class="rr-bk-h">Restore from zip</h3>
+        <p class="rr-q-hint">Bring back a full backup made here (or with <code>/backup export</code>). A safety snapshot of the current library is written to the app’s backups folder first; the site rebuilds and reloads when it’s done.</p>
+        <div class="rr-bk-opts">
+          <label class="rr-q-choice"><input type="radio" name="rr-backup-mode" value="merge" checked> Merge <span class="rr-bk-sub">adds the zip’s contents; keeps what’s here</span></label>
+          <label class="rr-q-choice"><input type="radio" name="rr-backup-mode" value="replace"> Replace everything <span class="rr-bk-sub">the library becomes exactly the zip</span></label>
+        </div>
+        <div class="rr-bk-row">
+          <button type="button" class="rr-btn rr-btn-ghost" id="rr-backup-zip-pick">Choose zip…</button>
+          <span class="rr-setup-step rr-bk-name" id="rr-backup-zip-name">No file chosen</span>
+          <button type="button" class="rr-btn" id="rr-backup-zip-import" disabled>Import zip</button>
+          <p class="rr-q-note" id="rr-backup-restore-msg" hidden></p>
+        </div>
+        <input type="file" id="rr-backup-zipfile" accept=".zip,application/zip" hidden>
+      </section>
+      <section class="rr-bk-sec">
+        <h3 class="rr-bk-h">Browser reading state only (JSON)</h3>
+        <p class="rr-q-hint">Your <b>reading status</b>, <b>priority stars</b>, <b>custom tags / collections</b>, dismissed graph nodes, and theme are stored in this browser only. Export them to a small JSON file to move them to another browser or device, or as a backup.</p>
+        <p class="rr-q-hint" id="rr-backup-static-hint">Your analysed papers, comparisons and discussions are files on disk. The full zip backup — and restore — lives in the Reading Room app (avatar menu → Back up); from an assistant, <code>/backup export</code> writes the same zip.</p>
+        <div class="rr-bk-row">
+          <button type="button" class="rr-btn" id="rr-backup-export">Export JSON</button>
+          <button type="button" class="rr-btn rr-btn-ghost" id="rr-backup-import">Import JSON…</button>
+          <span class="rr-backup-count rr-setup-step" id="rr-backup-count"></span>
+          <input type="file" id="rr-backup-file" accept="application/json,.json" hidden>
+        </div>
+        <p class="rr-q-note" id="rr-backup-msg" hidden></p>
+      </section>
     </div>
   </div>
 </div>
@@ -1551,8 +1644,8 @@ if (GRAPH.queue.length){
   </div>
 </div>
 
-<!-- "Setting up…" busy box (work mode only). Shown while the agent applies /setup;
-     the work-mode client closes the terminal drawer and fires the `rr-setup-done`
+<!-- "Setting up…" busy box (app only). Shown while the agent applies /setup;
+     the app client closes the terminal drawer and fires the `rr-setup-done`
      window event when the intake file disappears, which flips this to its ✓ state. -->
 <div class="rr-setup-busy" id="rr-setup-busy" hidden>
   <div class="rr-setup-busy-card" role="status" aria-live="polite">
@@ -1573,9 +1666,9 @@ if (GRAPH.queue.length){
 </div>
 
 <script>
-/* Account menu + Profile/Setup modals. Self-contained IIFE; reads the embedded
-   profile + section list and the optional work-mode hooks (RR_WORKMODE,
-   RR_launchAgent, RR_runInTerminal). Safe no-op if the avatar button is absent. */
+/* Account menu + Profile/Setup/Back up/Tutorial modals. Self-contained IIFE; reads the
+   embedded profile + section list and the optional app hooks (RR_WORKMODE, RR_launchAgent,
+   RR_submitCommand, RR_editProfile, RR_openUpdates). Safe no-op if the avatar button is absent. */
 (function () {
   var PROFILE  = {"defaults": {"depth": "standard", "audience": "peer", "views": []}};
   var SECTIONS = [{"key": "summary", "title": "Summary"}, {"key": "math", "title": "Method & math"}, {"key": "architecture", "title": "Architecture"}, {"key": "results", "title": "Results"}, {"key": "significance", "title": "Novelty & significance"}, {"key": "reproducibility", "title": "Reproducibility"}];   // [{key,title}] for the "default views" question
@@ -1611,6 +1704,10 @@ if (GRAPH.queue.length){
     if (which === 'profile') openProfile();
     else if (which === 'backup') openBackup();
     else if (which === 'tutorial') openTutorial(false);
+    else if (which === 'updates') {                 // app only (item added in initApp)
+      if (typeof window.RR_openUpdates === 'function') window.RR_openUpdates(true);
+      else flash('Checking for updates needs the app — open ReadingRoom.app (or ReadingRoom.bat).');
+    }
     else openSetup();
   });
 
@@ -1672,14 +1769,35 @@ if (GRAPH.queue.length){
     if (!arr || !arr.length) return '<span class="rr-muted">—</span>';
     return arr.map(function (x){ return '<span class="rr-chip">' + esc(x) + '</span>'; }).join(' ');
   }
+  // Under the app the modal also shows the reader's FULL profile (user/profile.md, a free-form
+  // Markdown page the commands read to calibrate reports): an excerpt from GET /api/profile-md,
+  // and an "Edit full profile" button that hands off to the app's Markdown editor.
+  var profileMdBtn = document.getElementById('rr-profile-editmd');
+  var PROFILE_MD_EXCERPT = 400;
+  function profileMdBlock(){
+    return '<div class="rr-prof-md" id="rr-profile-md"><span class="rr-k">Full profile</span>'
+         + '<div class="rr-prof-md-x rr-muted">Loading…</div></div>';
+  }
+  function loadProfileMd(){
+    var box = document.getElementById('rr-profile-md'); if (!box) return;
+    var out = box.querySelector('.rr-prof-md-x');
+    function show(text, muted){ out.className = 'rr-prof-md-x' + (muted ? ' rr-muted' : ''); out.textContent = text; }  // textContent: never markup
+    fetch('/api/profile-md').then(function (r){ return r.json(); }).then(function (j){
+      if (!box.isConnected) return;                                   // modal re-rendered meanwhile
+      var t = (j && j.ok && j.exists && typeof j.text === 'string') ? j.text.trim() : '';
+      if (!t) { show('No full profile yet — write one so reports fit you better.', true); return; }
+      show(t.length > PROFILE_MD_EXCERPT ? t.slice(0, PROFILE_MD_EXCERPT).replace(/\s+\S*$/, '') + ' …' : t, false);
+    }).catch(function (){ if (box.isConnected) show('Could not load the full profile.', true); });
+  }
   function openProfile(){
     var p = PROFILE || {};
     var d = p.defaults || {};
+    var wm = !!window.RR_WORKMODE;
     var body = document.getElementById('rr-profile-body');
+    var html = '';
     if (!p.name && !p.role && !(p.expertise||[]).length){
-      body.innerHTML = '<p class="rr-muted">No profile yet. Open <b>Setup</b> to create one.</p>';
+      html = '<p class="rr-muted">No profile yet. Open <b>Setup</b> to create one.</p>';
     } else {
-      var html = '';
       html += row('Name', esc(p.name) || '<span class="rr-muted">—</span>');
       html += row('Role', esc(p.role) || '<span class="rr-muted">—</span>');
       if (p.affiliation) html += row('Affiliation', esc(p.affiliation));
@@ -1688,32 +1806,182 @@ if (GRAPH.queue.length){
       html += row('Report defaults', esc((d.depth || 'standard')) + ' &middot; ' + esc((d.audience || 'peer'))
                   + ((d.views && d.views.length) ? ' &middot; views: ' + d.views.map(esc).join(', ') : ' &middot; all views'));
       if (p.tagline) html += row('Tagline', esc(p.tagline));
-      body.innerHTML = html;
     }
+    if (wm) html += profileMdBlock();
+    body.innerHTML = html;
+    profileMdBtn.hidden = !wm;
+    if (wm) loadProfileMd();
     openModal(profileModal);
   }
   document.getElementById('rr-profile-edit').addEventListener('click', function (){ closeModal(profileModal); openSetup(); });
+  profileMdBtn.addEventListener('click', function (){
+    closeModal(profileModal);
+    if (typeof window.RR_editProfile === 'function') window.RR_editProfile();
+    else flash('Editing the full profile needs the app — open ReadingRoom.app (or ReadingRoom.bat), or edit user/profile.md directly.');
+  });
 
   /* --------------------------------------------------------------- backup */
-  // Reading state (status / priority / dismissals / theme) lives in localStorage, per
-  // browser. Export/import it as a small JSON so it can move between browsers/devices.
-  // The on-disk data (reports/compares/chats) is handled by scripts/archive.py / the /backup command.
+  // Two layers. (1) Reading state (status / priority / collections / dismissals / theme)
+  // lives in localStorage, per browser — export/import it as a small JSON so it can move
+  // between browsers/devices; on the static site this is the only option. (2) Under the
+  // app (RR_WORKMODE) the same modal also drives scripts/archive.py through the server:
+  // a full zip of everything on disk (this browser's reading state is sent along so it
+  // travels INSIDE the zip) and a restore that merges/replaces, rebuilds, then reloads.
+  var backupTitleEl = document.getElementById('rr-backup-title');
   var backupMsgEl   = document.getElementById('rr-backup-msg');
   var backupCountEl = document.getElementById('rr-backup-count');
   var backupFileEl  = document.getElementById('rr-backup-file');
+  var bkZipSec      = document.getElementById('rr-backup-zip');
+  var bkRestoreSec  = document.getElementById('rr-backup-restore');
+  var bkStaticHint  = document.getElementById('rr-backup-static-hint');
+  var bkCountsEl    = document.getElementById('rr-backup-zip-counts');
+  var bkPdfsEl      = document.getElementById('rr-backup-pdfs');
+  var bkDlPath      = document.getElementById('rr-backup-dl-path');
+  var bkBkPath      = document.getElementById('rr-backup-bk-path');
+  var bkCustomEl    = document.getElementById('rr-backup-custom');
+  var bkExportBtn   = document.getElementById('rr-backup-zip-export');
+  var bkRevealBtn   = document.getElementById('rr-backup-zip-reveal');
+  var bkZipMsgEl    = document.getElementById('rr-backup-zip-msg');
+  var bkPickBtn     = document.getElementById('rr-backup-zip-pick');
+  var bkZipNameEl   = document.getElementById('rr-backup-zip-name');
+  var bkImportBtn   = document.getElementById('rr-backup-zip-import');
+  var bkRestoreMsgEl= document.getElementById('rr-backup-restore-msg');
+  var bkZipFileEl   = document.getElementById('rr-backup-zipfile');
   function isStateKey(k){ return /^rr-(status|prio|tags)-/.test(k) || k === 'rr-dismissed' || k === 'rr-theme'; }
   function stateKeys(){
     var ks = [];
     try { for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (isStateKey(k)) ks.push(k); } } catch (e) {}
     return ks;
   }
+  function stateSnapshot(){ var s = {}; try { stateKeys().forEach(function (k){ s[k] = localStorage.getItem(k); }); } catch (e) {} return s; }
   function backupMsg(t){ if (!backupMsgEl) return; backupMsgEl.textContent = t || ''; backupMsgEl.hidden = !t; }
+  function noteMsg(el, t, warn){ if (!el) return; el.textContent = t || ''; el.hidden = !t; el.classList.toggle('rr-bk-warn', !!warn); }
+  function plural(n, w){ n = Math.max(0, parseInt(n, 10) || 0); return n + ' ' + w + (n === 1 ? '' : 's'); }
+  function fmtBytes(b){
+    b = +b || 0; if (b < 1024) return b + ' B';
+    var u = ['KB', 'MB', 'GB'], i = -1;
+    do { b /= 1024; i++; } while (b >= 1024 && i < u.length - 1);
+    return (b < 10 ? b.toFixed(1) : String(Math.round(b))) + ' ' + u[i];
+  }
+  // parse a JSON reply; a non-JSON error page still yields an {ok:false} with the status
+  function asJson(r){ return r.json().then(null, function (){ return { ok: false, error: 'HTTP ' + r.status }; }); }
+  function checkedValue(name, dflt){ var r = backupModal.querySelector('input[name="' + name + '"]:checked'); return r ? r.value : dflt; }
+  var lastZip = null, pickedZip = null, importArmed = false;
+  function resetPick(){
+    pickedZip = null; importArmed = false;
+    bkZipNameEl.textContent = 'No file chosen';
+    bkImportBtn.disabled = true; bkImportBtn.textContent = 'Import zip'; bkPickBtn.disabled = false;
+  }
   function openBackup(){
     backupMsg('');
     var ks = stateKeys();
     backupCountEl.textContent = ks.length + (ks.length === 1 ? ' item in this browser' : ' items in this browser');
+    var wm = !!window.RR_WORKMODE;
+    backupTitleEl.textContent = wm ? 'Back up & restore' : 'Back up reading state';
+    bkZipSec.hidden = !wm; bkRestoreSec.hidden = !wm; bkStaticHint.hidden = wm;
+    if (wm) {
+      noteMsg(bkZipMsgEl, ''); noteMsg(bkRestoreMsgEl, '');
+      bkRevealBtn.hidden = true; lastZip = null; bkExportBtn.disabled = false;
+      resetPick(); loadBackupInfo();
+    }
     openModal(backupModal);
   }
+
+  /* ---- full zip (app only) ---- */
+  function loadBackupInfo(){
+    bkCountsEl.textContent = 'Counting your library…';
+    fetch('/api/backup/info').then(asJson).then(function (j){
+      if (!j || !j.ok) throw new Error((j && j.error) || 'info failed');
+      var c = j.counts || {};
+      bkCountsEl.textContent = 'Library: ' + plural(c.reports, 'report') + ' · ' + plural(c.comparisons, 'comparison')
+                             + ' · ' + plural(c.discussions, 'discussion') + ' · ' + plural(c.pdfs, 'PDF');
+      bkBkPath.textContent = j.backupsDir || '';
+      var dl = backupModal.querySelector('input[name="rr-backup-dest"][value="downloads"]');
+      if (j.downloadsDir) { bkDlPath.textContent = j.downloadsDir; dl.disabled = false; }
+      else {                                        // no Downloads folder on this machine: fall back to backups/
+        bkDlPath.textContent = 'not found'; dl.disabled = true;
+        if (dl.checked) { var bk = backupModal.querySelector('input[name="rr-backup-dest"][value="backups"]'); bk.checked = true; }
+      }
+    }).catch(function (){ bkCountsEl.textContent = ''; });
+  }
+  backupModal.addEventListener('change', function (e){
+    var t = e.target; if (!t || !t.name) return;
+    if (t.name === 'rr-backup-dest') {                  // custom path input appears only for "Custom path…"
+      var custom = t.value === 'custom';
+      bkCustomEl.hidden = !custom; if (custom) bkCustomEl.focus();
+    } else if (t.name === 'rr-backup-mode') {           // switching mode disarms a pending "replace" confirmation
+      importArmed = false; bkImportBtn.textContent = 'Import zip'; noteMsg(bkRestoreMsgEl, '');
+    }
+  });
+  bkExportBtn.addEventListener('click', function (){
+    var dest = checkedValue('rr-backup-dest', 'downloads');
+    var custom = (bkCustomEl.value || '').trim();
+    if (dest === 'custom' && !custom) { noteMsg(bkZipMsgEl, 'Enter where to save the zip — a folder, or a full path ending in .zip.', true); bkCustomEl.focus(); return; }
+    var body = { pdfs: !!bkPdfsEl.checked, dest: dest, state: stateSnapshot() };
+    if (dest === 'custom') body.path = custom;
+    bkExportBtn.disabled = true; bkRevealBtn.hidden = true; lastZip = null;
+    noteMsg(bkZipMsgEl, 'Writing the zip…' + (body.pdfs ? ' (PDFs included — this can take a moment)' : ''));
+    fetch('/api/backup/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(asJson)
+      .then(function (j){
+        if (!j.ok) throw new Error(j.error || 'export failed');
+        lastZip = j.path; var c = j.counts || {};
+        noteMsg(bkZipMsgEl, 'Saved to ' + j.path + ' — ' + plural(c.reports, 'report') + ', ' + plural(c.comparisons, 'comparison')
+          + ', ' + plural(c.discussions, 'discussion') + (j.includes_pdfs ? ', ' + plural(c.pdfs, 'PDF') : '')
+          + (j.bytes ? ' · ' + fmtBytes(j.bytes) : ''));
+        bkRevealBtn.hidden = !j.path;
+      })
+      .then(null, function (e){ noteMsg(bkZipMsgEl, 'Export failed' + (e && e.message ? ': ' + e.message : '') + '.', true); })
+      .then(function (){ bkExportBtn.disabled = false; });
+  });
+  bkRevealBtn.addEventListener('click', function (){
+    if (!lastZip) return;
+    fetch('/api/backup/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: lastZip }) })
+      .then(asJson).then(function (j){ if (!j.ok) throw new Error(j.error || 'reveal failed'); })
+      .then(null, function (e){ noteMsg(bkZipMsgEl, 'Could not open the folder' + (e && e.message ? ': ' + e.message : '') + '. The zip is at ' + lastZip, true); });
+  });
+
+  /* ---- restore from zip (app only) ---- */
+  bkPickBtn.addEventListener('click', function (){ bkZipFileEl.click(); });
+  bkZipFileEl.addEventListener('change', function (){
+    var f = bkZipFileEl.files && bkZipFileEl.files[0];
+    bkZipFileEl.value = '';                        // allow re-selecting the same file later
+    if (!f) return;
+    if (!/\.zip$/i.test(f.name)) { noteMsg(bkRestoreMsgEl, 'Choose a .zip written by Back up (reading-room-backup-….zip).', true); return; }
+    pickedZip = f; importArmed = false;
+    bkZipNameEl.textContent = f.name + ' · ' + fmtBytes(f.size);
+    bkImportBtn.disabled = false; bkImportBtn.textContent = 'Import zip';
+    noteMsg(bkRestoreMsgEl, '');
+  });
+  bkImportBtn.addEventListener('click', function (){
+    if (!pickedZip) return;
+    var mode = checkedValue('rr-backup-mode', 'merge');
+    if (mode === 'replace' && !importArmed) {     // destructive: ask once, inline
+      importArmed = true; bkImportBtn.textContent = 'Yes, replace everything';
+      noteMsg(bkRestoreMsgEl, 'This replaces your whole library with the zip’s contents (a safety snapshot goes to the app’s backups folder first). Click again to confirm.', true);
+      return;
+    }
+    var f = pickedZip;
+    bkImportBtn.disabled = true; bkPickBtn.disabled = true;
+    noteMsg(bkRestoreMsgEl, 'Uploading ' + f.name + ' and restoring (' + mode + ')… the site rebuilds before this finishes, so give it a minute.');
+    fetch('/api/backup/import?mode=' + encodeURIComponent(mode), { method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: f })
+      .then(asJson)
+      .then(function (j){
+        if (!j.ok) throw new Error(j.error || 'import failed');
+        var n = 0;                                  // the zip carried a reading state: adopt it here too
+        if (j.state && typeof j.state === 'object') {
+          try { Object.keys(j.state).forEach(function (k){ if (isStateKey(k)) { localStorage.setItem(k, String(j.state[k])); n++; } }); } catch (e) {}
+        }
+        noteMsg(bkRestoreMsgEl, 'Restored ' + plural(j.written, 'file') + (n ? ' and ' + plural(n, 'reading-state item') : '') + '. Reloading…');
+        setTimeout(function (){ location.reload(); }, 900);
+      })
+      .then(null, function (e){
+        noteMsg(bkRestoreMsgEl, 'Restore failed' + (e && e.message ? ': ' + e.message : '') + '. Nothing was changed if the zip was refused; otherwise the safety snapshot in backups/ has your previous library.', true);
+        bkImportBtn.disabled = false; bkPickBtn.disabled = false; importArmed = false; bkImportBtn.textContent = 'Import zip';
+      });
+  });
+
+  /* ---- browser reading state as JSON (always; the only option on the static site) ---- */
   document.getElementById('rr-backup-export').addEventListener('click', function (){
     var data = { tool: 'reading-room', kind: 'reading-state', exported: new Date().toISOString().slice(0, 10), state: {} };
     stateKeys().forEach(function (k){ data.state[k] = localStorage.getItem(k); });
@@ -1935,11 +2203,11 @@ if (GRAPH.queue.length){
     }).catch(function (){ sfbApply.disabled = false; sfbMsg.textContent = 'Could not apply — try again.'; });
   });
 
-  /* ---- "Setting up…" busy box (work mode) -------------------------------
-     Shown once /setup is sent to the agent. The work-mode client fires the
+  /* ---- "Setting up…" busy box (app only) --------------------------------
+     Shown once /setup is sent to the agent. The app client fires the
      `rr-setup-done` window event when the intake file disappears (= the agent
      finished) and closes the terminal drawer; we flip to ✓ and the page reloads
-     (work mode reloads on the rebuild; the timer here is only a fallback). */
+     (the app reloads on the rebuild; the timer here is only a fallback). */
   var busyBox = document.getElementById('rr-setup-busy');
   var busyMsg = document.getElementById('rr-setup-busy-msg');
   var busySub = document.getElementById('rr-setup-busy-sub');
@@ -1970,14 +2238,14 @@ if (GRAPH.queue.length){
       busyBox.setAttribute('hidden','');        // 'hide' keeps busyActive — a later done still lands
     }
   }
-  window.RR_setupBusy = setupBusy;              // seam for work mode + tests
+  window.RR_setupBusy = setupBusy;              // seam for the app client + tests
   window.addEventListener('rr-setup-done', function (){ setupBusy('done'); });
   if (busyTerm) busyTerm.addEventListener('click', function (){
     setupBusy('hide');
     if (typeof window.RR_openTerminal === 'function') window.RR_openTerminal();
   });
 
-  // Launch the chosen AI (Claude/Codex/Gemini) in the integrated terminal (work mode only). We snapshot the
+  // Launch the chosen AI (Claude/Codex/Gemini) in the integrated terminal (app only). We snapshot the
   // answers, launch the agent, then CLOSE the modal so its blurred backdrop stops covering
   // the terminal (a first-run login must be typed there) — the floating bar finishes it.
   launchWrap.addEventListener('click', function (e){
@@ -1989,7 +2257,7 @@ if (GRAPH.queue.length){
       closeModal(setupModal);
       showFinishBar(name);
     } else {
-      flash('Launching agents needs work mode — run it from ReadingRoom.app, or start `' + name + '` in your terminal.');
+      flash('Launching an assistant needs the app — open ReadingRoom.app (or ReadingRoom.bat), or start `' + name + '` in your own terminal.');
     }
   });
 
@@ -2020,8 +2288,8 @@ if (GRAPH.queue.length){
     launchWrap.hidden = true; finishBtn.hidden = true; nextBtn.hidden = true; backBtn.hidden = true;
     stepEl.textContent = 'Review';
     bodyEl.innerHTML =
-      '<p class="rr-q-hint">This couldn’t be applied automatically (work mode isn’t running, or saving failed). '
-      + 'Open <b>ReadingRoom.app</b> (work mode) and use Setup there, or paste this into <code>profile.json</code> '
+      '<p class="rr-q-hint">This couldn’t be applied automatically (the app isn’t running, or saving failed). '
+      + 'Open the app (<b>ReadingRoom.app</b> / <b>ReadingRoom.bat</b>) and use Setup there, or paste this into <code>user/profile.json</code> '
       + 'and run <code>/setup</code> in your AI assistant to adapt your commands.</p>'
       + '<pre class="rr-q-json" id="rr-q-json">' + esc(JSON.stringify(prof, null, 2)) + '</pre>'
       + '<button type="button" class="rr-btn rr-btn-ghost" id="rr-q-copy">Copy</button>';
@@ -2041,34 +2309,34 @@ if (GRAPH.queue.length){
     { shot:'image', img:'assets/shots/catalogue.png',
       cap:'The catalogue: your papers as cards, with search and tag filters.',
       title:'Welcome to Reading Room',
-      body:'Reading Room turns a paper into a focused, multi-tab breakdown and keeps it in a fast, searchable catalogue you own — generated in your AI coding session, no API.' },
+      body:'Reading Room turns a paper into a focused, multi-tab breakdown and keeps it in a fast, searchable catalogue you own. Every report is written by your own AI coding assistant — Claude Code, Codex CLI, or Gemini CLI — under the subscription you already have: <b>no API key, no API billing</b>.' },
     { shot:'gif', img:'assets/shots/analyze.gif',
       cap:'The one-click Analyze flow — enter a paper, the report builds.',
       title:'Add a paper',
-      body:'In your AI assistant (Claude, Codex, or Gemini) run <code>/explain-paper &lt;arxiv-id&gt;</code> (or a PDF path). It reads the paper, proposes a short outline you approve, then writes the report and builds the page — no manual build step.',
-      body2:'Tune each report with flags: <code>--depth skim|standard|deep</code>, <code>--audience peer|newcomer</code>, <code>--views summary,math,results</code> to pick sections, <code>--focus "the stability proof"</code> to lean on one thing, and <code>--approve</code> to skip the approval gate.' },
+      body:'Click <b>Analyze paper</b>, paste an arXiv id, a URL, or a PDF path, pick your assistant, and go. The app does the rest: it reads the paper, writes the report, and the new page shows up in your catalogue the moment it’s done — no terminal to watch, no build step. Changed your mind? <b>Stop</b> cancels the run and leaves your library exactly as it was.',
+      body2:'Prefer typing? Every flow is also a slash command in the assistant: <code>/explain-paper &lt;arxiv-id&gt;</code>, with <code>--depth skim|standard|deep</code>, <code>--audience peer|newcomer</code>, <code>--views summary,math,results</code> to pick sections, or <code>--focus "the stability proof"</code> to lean on one thing.' },
     { shot:'image', img:'assets/shots/report.png',
       cap:'A report page: focus-view tabs, real LaTeX, and results tables.',
       title:'Read it your way',
-      body:'Every paper gets tabs — Summary, Method &amp; math, Results, Significance… — pitched to your field. Set a reading status and a star priority right on the page.' },
+      body:'Every paper gets tabs — Summary, Method &amp; math, Results, Significance… — pitched to your field. Set a reading status and a star priority right on the page, open the PDF alongside it, and keep your own notes under the report.' },
     { shot:'image', img:'assets/shots/library.png',
       cap:'The Library with collection chips and one-click BibTeX export.',
       title:'Organize &amp; cite',
       body:'Add your own <b>custom tags</b> to group papers into collections (a project name, “to-cite”…). On the <b>Library</b>, click a collection to filter it, then export its <b>BibTeX</b> in one click.',
-      body2:'Run <code>/refresh-venues</code> to review whether your arXiv preprints have since been published — it checks DBLP and updates the venue + BibTeX to the journal/conference entry, keeping the arXiv link for reading.' },
+      body2:'Now and then ask your assistant to <code>/refresh-venues</code>: it checks whether your arXiv preprints have since been published and updates the venue + BibTeX to the journal/conference entry, keeping the arXiv link for reading.' },
     { shot:'image', img:'assets/shots/graph.png',
       cap:'The connections graph: papers linked by citation, with ghost suggestions.',
       title:'Follow the connections',
-      body:'The graph links your papers by citation and surfaces <b>ghost</b> nodes — important references worth analyzing next.' },
+      body:'The graph links your papers by citation and surfaces <b>ghost</b> nodes — important references worth reading next. <b>Analyze</b> on a ghost adds it to your library in one click; <b>Dismiss</b> hides the ones you don’t care about.' },
     { shot:'gif', img:'assets/shots/apptour.gif',
-      cap:'Work mode: an integrated AI terminal and one-click flows.',
-      title:'Discuss &amp; go deeper (work mode)',
-      body:'Run it as a local desktop app: one-click flows (Analyze &middot; Compare &middot; Discuss &middot; Deep dive) run the assistant for you, with <b>live rebuilds</b> — a new report appears the moment it finishes. The terminal stays out of the way until you want it, and you can read the PDF inside the app.',
-      body2:'<b>Discuss</b> a paper conversationally (<code>/learn</code>) and save the chat, add a worked <b>Deep dive</b> — a full proof or derivation (<code>/deep-dive</code>), or put two or three papers side by side (<code>/compare</code>). It runs on your machine only (loopback), and you still approve every step the AI takes.' },
+      cap:'Analyze · Compare · Discuss · Deep dive — one click each; the assistant works in the background.',
+      title:'Compare, discuss &amp; go deeper',
+      body:'The other flows sit right next to Analyze. <b>Compare</b> puts two or three papers side by side — search your library, tick them, and optionally give it a question to organise the comparison around (“which handles long sequences better, and at what cost?”). <b>Discuss</b> opens a conversation about a paper and saves it as a Discussion when you end the chat. <b>Deep dive</b> adds a worked derivation or proof to an existing report.',
+      body2:'Each flow runs the assistant for you; <b>Show terminal</b> reveals it if it ever needs your input, and <b>Stop</b> cancels a flow without touching your library. Everything runs locally on your machine — the assistant is the only part that talks to a cloud service, under your own subscription.' },
     { shot:'image', img:'assets/shots/setup.png',
       cap:'The Setup questionnaire — field, focus views, and defaults.',
       title:'Make it yours',
-      body:'Last thing: set up your profile and field so every report is tailored to you. Let’s do that now.' },
+      body:'Last thing: set up your profile and field so every report is tailored to you. Later, <b>Profile → Edit full profile</b> (avatar menu) lets you write a fuller page about your background and projects that reports read too. Let’s do that now.' },
   ];
   var tutToSetup = false, tutIdx = 0;
   var tutBody = document.getElementById('rr-tut-body');
@@ -2120,7 +2388,7 @@ if (GRAPH.queue.length){
   // tutorial in every OTHER downloaded copy opened on the same machine — but a fresh
   // clone/ZIP must show it. The root path ('' resolved against the page)
   // is the same on every page of one copy and different for each copy/host.
-  // Scope the seen-flag to THIS copy. Under work mode every clone is served from the
+  // Scope the seen-flag to THIS copy. Under the app every clone is served from the
   // same loopback origin at path "/", so a path-based key can't distinguish clones —
   // key on the server-provided clone id (RR_WORKMODE.root) instead. On file:// / Pages
   // there's no server, so fall back to the root PATH (unique per downloaded copy).
@@ -2129,14 +2397,31 @@ if (GRAPH.queue.length){
     if (wm && wm.root) return 'rr-tutorial-seen@wm:' + wm.root;
     return 'rr-tutorial-seen@' + new URL('' || './', location.href).pathname;
   }
-  // Defer the first-run check: the work-mode server injects window.RR_WORKMODE near the
+  // Defer the first-run check: the app's server injects window.RR_WORKMODE near the
   // end of the page — AFTER this script — so read it on DOMContentLoaded, not at parse.
   function checkFirstRun(){
     var seen = false; try { seen = localStorage.getItem(tutSeenKey()) === '1'; } catch (e) {}
     if (!seen) autoOpenTimer = setTimeout(function (){ openTutorial(true); }, 500);
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', checkFirstRun);
-  else checkFirstRun();
+
+  /* ------------------------------------------------- app-only extras (RR_WORKMODE) */
+  // Same deferral: the avatar menu gains an "Updates" item (→ window.RR_openUpdates, the
+  // modal lives in the app client) and the Profile modal its "Edit full profile" button
+  // only when the page is served by the app. The static site never shows them.
+  function initApp(){
+    if (!window.RR_WORKMODE) return;
+    if (!menu.querySelector('[data-acct="updates"]')) {
+      var u = document.createElement('button');
+      u.type = 'button'; u.className = 'rr-acct-item';
+      u.setAttribute('data-acct', 'updates'); u.setAttribute('role', 'menuitem');
+      u.textContent = 'Updates';
+      menu.appendChild(u);
+    }
+    profileMdBtn.hidden = false;
+  }
+  function onReady(){ initApp(); checkFirstRun(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onReady);
+  else onReady();
 })();
 </script>
 

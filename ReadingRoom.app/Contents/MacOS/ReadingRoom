@@ -3,16 +3,22 @@
 # Reading Room — macOS .app launcher (zero windows).
 #
 # This is the executable inside ReadingRoom.app. Double-clicking the app runs it
-# WITHOUT opening any Terminal window: it starts the local "work mode" server and
-# the server opens the chromeless app window itself. Errors are shown as a native
-# dialog (there's no console to print to).
+# WITHOUT opening any Terminal window: it starts the local server (workmode/)
+# and the server opens the chromeless app window itself. Errors are shown as a
+# native dialog (there's no console to print to).
 #
-# IMPORTANT: the server must run as this script's CHILD, with this script alive
-# for the whole session (`wait`). Detaching it (nohup … & + exit 0) does NOT work
-# from an .app: the moment the main executable exits, launchd tears down the
-# app's process group and kills the server before it can even write a log line —
-# double-click then silently does nothing. LSUIElement in Info.plist keeps the
-# running app out of the Dock, so staying alive shows no UI either way.
+# INVARIANTS (all learned the hard way — keep them):
+#  * The server must run as this script's CHILD, with this script alive for the
+#    whole session (`wait`). Detaching it (nohup … & + exit 0) does NOT work
+#    from an .app: the moment the main executable exits, launchd tears down the
+#    app's process group and kills the server before it can even write a log
+#    line — double-click then silently does nothing. LSUIElement in Info.plist
+#    keeps the running app out of the Dock, so staying alive shows no UI.
+#  * The server runs in a LOOP: exit code 75 means "restart me" (the in-app
+#    updater just installed a new version) — relaunch it, still as our child.
+#    Any other exit code ends the session; nothing here can spin hot.
+#  * User-facing dialog text says "Reading Room" / "the app" — file paths such
+#    as workmode/workmode.log are the only place the folder name appears.
 #
 # The server auto-quits a few seconds after the app window closes, which ends
 # this script too. Logs: workmode/workmode.log; pid: workmode/workmode.pid
@@ -34,6 +40,9 @@ die() {
   "$OSA" -e "display dialog \"Reading Room\n\n$1\" buttons {\"OK\"} default button 1 with icon caution with title \"Reading Room\"" >/dev/null 2>&1
   exit 1
 }
+notify() {
+  "$OSA" -e "display notification \"$1\" with title \"Reading Room\"" >/dev/null 2>&1
+}
 
 # --- pre-flight: can this app actually READ its own files? -------------------
 # When the repo lives in a macOS-protected location (OneDrive/iCloud CloudStorage,
@@ -49,23 +58,37 @@ if ! cat "$REPO/workmode/package.json" >/dev/null 2>&1; then
   exit 1
 fi
 
-# First run only: offer to put a shortcut on the Desktop (or a folder the reader
-# picks). A plain symlink — no Finder automation, so no permission prompts.
+# First run only: offer a shortcut — on the Desktop (default) or in the
+# Applications folder (/Applications when writable, else ~/Applications). A
+# plain symlink named "Reading Room.app" — no Finder automation, so no
+# permission prompts; Finder and Spotlight treat it like the app itself.
 offer_shortcut() {
   MARKER="$REPO/user/.desktop-shortcut-offered"
   [ -f "$MARKER" ] && return 0
   mkdir -p "$REPO/user" && : >"$MARKER"   # one-shot, whatever they choose
-  BTN="$("$OSA" -e 'button returned of (display dialog "Add a Reading Room shortcut to your Desktop?\n\nYou can move it anywhere later — it is just a link to this app." buttons {"Not now", "Choose folder…", "Add to Desktop"} default button "Add to Desktop" with title "Reading Room" with icon note)' 2>/dev/null)"
-  DEST=""
+  BTN="$("$OSA" -e 'button returned of (display dialog "Add a Reading Room shortcut?\n\nIt is just a link to this app — you can move or delete it any time." buttons {"Not now", "Applications folder", "Desktop"} default button "Desktop" with title "Reading Room" with icon note)' 2>/dev/null)"
+  DEST="" WHERE=""
   case "$BTN" in
-    "Add to Desktop") DEST="$HOME/Desktop" ;;
-    "Choose folder…") DEST="$("$OSA" -e 'POSIX path of (choose folder with prompt "Where should the Reading Room shortcut go?")' 2>/dev/null)" ;;
+    "Desktop") DEST="$HOME/Desktop"; WHERE="your Desktop" ;;
+    "Applications folder")
+      if [ -w /Applications ]; then DEST="/Applications"; WHERE="the Applications folder"
+      else DEST="$HOME/Applications"; WHERE="your Applications folder"; mkdir -p "$DEST" 2>/dev/null; fi ;;
     *) return 0 ;;
   esac
-  if [ -n "$DEST" ] && [ -d "$DEST" ]; then
-    ln -sfn "$REPO/ReadingRoom.app" "${DEST%/}/Reading Room.app" 2>/dev/null \
-      && "$OSA" -e 'display notification "Shortcut added." with title "Reading Room"' >/dev/null 2>&1
+  [ -d "$DEST" ] || return 0
+  # A real "Reading Room.app" (not a symlink) already there — an older copy, say —
+  # must not be touched: `ln -sfn` would otherwise create the link INSIDE it.
+  if [ -e "$DEST/Reading Room.app" ] && [ ! -L "$DEST/Reading Room.app" ]; then
+    notify "A Reading Room.app already exists in $WHERE — shortcut not added."
+    return 0
   fi
+  if ! ln -sfn "$REPO/ReadingRoom.app" "$DEST/Reading Room.app" 2>/dev/null; then
+    # /Applications looked writable but wasn't (ACLs) — fall back to the user's own.
+    [ "$DEST" = "/Applications" ] || return 0
+    DEST="$HOME/Applications"; WHERE="your Applications folder"
+    mkdir -p "$DEST" 2>/dev/null && ln -sfn "$REPO/ReadingRoom.app" "$DEST/Reading Room.app" 2>/dev/null || return 0
+  fi
+  notify "Shortcut added to $WHERE."
 }
 
 # --- locate Node (an .app launch starts with a minimal PATH) -----------------
@@ -97,7 +120,7 @@ fi
 
 if ! have_node; then
   open "https://nodejs.org/en/download" >/dev/null 2>&1
-  die "Node.js is required for work mode but was not found. Install it from nodejs.org (or: brew install node), then open Reading Room again."
+  die "Reading Room needs Node.js, which was not found. Install it from nodejs.org (or: brew install node), then open Reading Room again."
 fi
 
 # --- require Node >= 18 up front (a too-old Node would fail cryptically
@@ -109,10 +132,10 @@ case "$NODE_MAJOR" in
 esac
 if [ "$NODE_MAJOR" -lt 18 ]; then
   open "https://nodejs.org/en/download" >/dev/null 2>&1
-  die "Work mode needs Node.js 18 or newer — found $(node -v). Update it from nodejs.org (or: brew upgrade node), then open Reading Room again."
+  die "Reading Room needs Node.js 18 or newer — found $(node -v). Update it from nodejs.org (or: brew upgrade node), then open Reading Room again."
 fi
 
-# --- install work-mode dependencies on first run ----------------------------
+# --- install the server's dependencies on first run -------------------------
 # npm install takes a minute or two, and a double-clicked .app shows NOTHING
 # while it runs (no Dock icon, no window, no dialog) — without feedback a first
 # launch looks dead, and a second impatient double-click would race this install.
@@ -120,15 +143,15 @@ fi
 LOCK="$REPO/workmode/.install.lock"
 if [ ! -d "workmode/node_modules" ]; then
   if [ -f "$LOCK" ] && [ -n "$(find "$LOCK" -mmin -15 2>/dev/null)" ]; then
-    "$OSA" -e 'display notification "Still setting up (first run) — the window opens when it finishes." with title "Reading Room"' >/dev/null 2>&1
+    notify "Still setting up (first run) — the window opens when it finishes."
     exit 0
   fi
   : >"$LOCK"
-  "$OSA" -e 'display notification "First-run setup (about a minute) — the window opens when it is ready." with title "Reading Room"' >/dev/null 2>&1
+  notify "First-run setup (about a minute) — the window opens when it is ready."
   ( cd workmode && npm install --no-audit --no-fund ) >"$REPO/workmode/install.log" 2>&1
   RC=$?
   rm -f "$LOCK"
-  [ "$RC" -ne 0 ] && die "Installing work-mode dependencies failed. See workmode/install.log for details."
+  [ "$RC" -ne 0 ] && die "Installing Reading Room's dependencies failed. See workmode/install.log for details."
   # node-pty is a native module; if npm's script policy skipped its build the app
   # would open with the terminal disabled — rebuild it explicitly in that case.
   if ! ( cd workmode && node -e "require('node-pty')" ) >/dev/null 2>&1; then
@@ -147,27 +170,73 @@ fi
 
 # --- start the server as our child and stay alive for the session -----------
 LOG="$REPO/workmode/workmode.log"
-cd "$REPO/workmode" || die "The workmode/ folder is missing."
-node server.js >"$LOG" 2>&1 &
-SRV=$!
-echo "$SRV" >"$PIDFILE"
+cd "$REPO/workmode" || die "Part of the app is missing (the workmode/ folder). Download Reading Room again."
 
-# If the server dies in its first seconds (port trouble, a broken update, …),
-# say why instead of failing silently.
-sleep 3
-if ! kill -0 "$SRV" 2>/dev/null; then
-  ERR="$(tail -n 3 "$LOG" 2>/dev/null | tr '"\\' "' ")"
-  rm -f "$PIDFILE"
-  # Died without writing a single log line = blocked by macOS file permissions
-  # (per-file TCC can pass the pre-flight read yet still deny other files).
-  if [ -z "$ERR" ]; then
-    die "macOS blocked the work-mode server before it could write a single log line.\n\nGrant access once in System Settings → Privacy & Security → Full Disk Access: click +, add ReadingRoom.app, then open Reading Room again."
+# After an update restart, the page that asked for it stays open and reloads
+# itself once the new server answers — so the relaunch must NOT open a second
+# window (RR_NO_OPEN=1). The catch: the server only arms its own auto-quit when
+# a window DISCONNECTS, so if that page was closed mid-restart the new server
+# would sit there windowless forever, and the next double-click would see it
+# "already running" and do nothing. This watches for that (bounded) and opens
+# a window itself if nobody has connected. Runs in the background beside `wait`.
+reopen_if_orphaned() {
+  local srv="$1" url="" port="" i a
+  for i in $(seq 1 90); do                     # the restart rebuilds docs/ first
+    sleep 1
+    kill -0 "$srv" 2>/dev/null || return 0
+    url="$(grep -o 'http://127\.0\.0\.1:[0-9]*/' "$LOG" 2>/dev/null | head -n 1)"
+    [ -n "$url" ] && break
+  done
+  [ -n "$url" ] || return 0
+  sleep 20                                     # ample for the old page to reload + reconnect
+  kill -0 "$srv" 2>/dev/null || return 0
+  port="${url##*:}"; port="${port%/}"
+  netstat -an -p tcp 2>/dev/null | grep -q "127\.0\.0\.1\.$port .*ESTABLISHED" && return 0
+  for a in "Google Chrome" "Microsoft Edge" "Brave Browser" "Chromium"; do   # same order as the server
+    if [ -d "/Applications/$a.app" ] || [ -d "$HOME/Applications/$a.app" ]; then
+      open -na "$a" --args "--app=$url" --new-window >/dev/null 2>&1 && return 0
+    fi
+  done
+  open "$url" >/dev/null 2>&1
+}
+
+RESTARTED=0
+export RR_LAUNCHER=1      # tells the server this loop relaunches it on exit 75 (so "Restart now" is offered)
+while :; do
+  if [ "$RESTARTED" -eq 0 ]; then
+    node server.js >"$LOG" 2>&1 &
+  else
+    RR_NO_OPEN=1 node server.js >"$LOG" 2>&1 &
   fi
-  die "The work-mode server failed to start.\n\n$ERR\n\nFull log: workmode/workmode.log"
-fi
+  SRV=$!
+  echo "$SRV" >"$PIDFILE"
 
-offer_shortcut
+  # If the server dies in its first seconds (port trouble, a broken update, …),
+  # say why instead of failing silently.
+  sleep 3
+  if ! kill -0 "$SRV" 2>/dev/null; then
+    ERR="$(tail -n 3 "$LOG" 2>/dev/null | tr '"\\' "' ")"
+    rm -f "$PIDFILE"
+    # Died without writing a single log line = blocked by macOS file permissions
+    # (per-file TCC can pass the pre-flight read yet still deny other files).
+    if [ -z "$ERR" ]; then
+      die "macOS blocked Reading Room before it could write a single log line.\n\nGrant access once in System Settings → Privacy & Security → Full Disk Access: click +, add ReadingRoom.app, then open Reading Room again."
+    fi
+    [ "$RESTARTED" -eq 1 ] && die "Reading Room could not start after the update.\n\n$ERR\n\nFull log: workmode/workmode.log — ask your AI assistant to run /update to finish it, or open Reading Room again."
+    die "Reading Room failed to start.\n\n$ERR\n\nFull log: workmode/workmode.log"
+  fi
 
-wait "$SRV"
+  if [ "$RESTARTED" -eq 0 ]; then
+    offer_shortcut
+  else
+    reopen_if_orphaned "$SRV" &
+  fi
+
+  wait "$SRV"
+  RC=$?
+  [ "$RC" -eq 75 ] || break                    # 75 = "restart me" (in-app update)
+  RESTARTED=1
+  notify "Update installed — restarting…"
+done
 rm -f "$PIDFILE"
 exit 0

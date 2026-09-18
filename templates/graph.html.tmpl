@@ -73,9 +73,9 @@ if (!GRAPH.links.length){
   emptyEl.hidden = false;
   if (GRAPH.nodes.length) emptyEl.classList.add('stage-empty--footer');  // don't overlap drawn nodes
   emptyEl.innerHTML = GRAPH.nodes.length === 0
-    ? 'No papers yet — add your first with <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant (Claude, Codex, or Gemini).'
+    ? 'No papers yet — add your first with the <b>Analyze paper</b> button in the app (or <code>/explain-paper &lt;arxiv-id&gt;</code> in your AI assistant).'
     : GRAPH.nodes.length === 1
-    ? 'One paper so far. Connections appear once papers in your library cite each other — analyze one of its references (see the reading queue below) to draw the first edge.'
+    ? 'One paper so far. Connections appear once papers in your library cite each other — analyze one of its references to draw the first edge.'
     : 'No internal citations yet. Edges appear when one analyzed paper cites another (or two share a reference).';
 }
 
@@ -220,7 +220,7 @@ window.addEventListener('resize', resize);
 const queueEl = document.getElementById('queue');
 if (GRAPH.queue.length){
   queueEl.innerHTML = '<h2>Reading queue</h2>'
-    + '<p class="sub">References cited by your library that you haven’t analyzed yet — most-cited first. Two or more citations promotes a reference into the graph above.</p>'
+    + '<p class="sub">References cited by two or more of your papers that you haven’t analyzed yet — most-cited first. Each one is also drawn as a hollow node in the graph above.</p>'
     + '<ul class="qlist">' + GRAPH.queue.map(q => {
         const title = q.title ? esc(q.title) : '<em>untitled reference</em>';
         return `<li class="qitem">
@@ -228,6 +228,9 @@ if (GRAPH.queue.length){
           <span class="q-title"><a href="https://arxiv.org/abs/${esc(q.id)}">${title}</a><span class="q-id">${esc(q.id)}</span></span>
         </li>`;
       }).join('') + '</ul>';
+} else if (papers) {
+  queueEl.innerHTML = '<h2>Reading queue</h2>'
+    + '<p class="sub">Nothing queued yet. A reference is listed here once two or more of your papers cite it — so the queue fills up as your library grows.</p>';
 }
 
 /* ---- theme toggle ---- */
