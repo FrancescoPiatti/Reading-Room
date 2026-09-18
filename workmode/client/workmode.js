@@ -246,7 +246,9 @@
   var discuss = null;                            // the running /learn discussion { id, started } (visible terminal), or null
   var serverStartedAt = null;                    // /api/status startedAt — tells a restarted server from the old one
   var keepHintUntil = 0;                         // a deliberate stop's hint outlives the shell-exit hint that follows it
-  var agentLive = false;                         // an assistant launch line has been flushed into the CURRENT shell
+  var agentLive = false;                         // the CURRENT shell is running a live assistant (TUI seen after a launch)
+  var launchedAi = null;                         // which assistant was launched into the current shell
+  var launchWatch = null;                        // { name, at, bytes } while a launch's first output is being judged
   var CLR = '\x15';                              // Ctrl+U: clear the input line before (re)typing, so an
                                                  // un-run pre-typed command never accumulates with the next
   var reconnectTimer = null, reconnectDelay = 1500;
@@ -291,6 +293,7 @@
       if (m.type === 'data') {
         if (term) term.write(m.data);
         lastPtyData = Date.now();
+        if (launchWatch) judgeLaunch(m.data);
         if (activeArm && !activeArm.sent()) activeArm.note(m.data);
         // belt-and-braces: the assistant producing output IS the launch happening —
         // never leave a stale "launching X …" hint on screen past that point
@@ -321,7 +324,7 @@
           if (!job) toast('Discussion saved — ' + m.slug, 'Open', function (){ location.href = '/chat/' + encodeURIComponent(m.slug) + '/'; });
         }
       }
-      else if (m.type === 'agent-exited') { agentLive = false; onAgentExited(); }   // the shell has had no child for a while: the assistant is gone
+      else if (m.type === 'agent-exited') { agentLive = false; launchWatch = null; onAgentExited(); }   // the shell has had no child for a while: the assistant is gone
       else if (m.type === 'job-started') onJobStarted(m);    // the server registered our run: keep its ownership token
       else if (m.type === 'job-stopped') onJobStopped(m);    // the server finished rolling back a stopped run
       else if (m.type === 'update-progress') updProgress(m); // an update is being applied (pull / install / build)
@@ -357,7 +360,7 @@
         // Stop right before "Launch codex"); the queued launch must survive to the new
         // shell's 'ready', so don't reset the handshake or drop `pending` here
         if (awaitingReady) return;
-        agentLive = false;
+        agentLive = false; launchedAi = null; launchWatch = null;
         if (Date.now() > keepHintUntil) setHint('shell exited — reopen to start a new one');
         spawned = false; awaitingReady = false; wantSpawn = false; pending = [];
         afterFlush = null;                       // a REAL exit (respawns are epoch-guarded server-side): a queued launch has no shell to land in
@@ -478,7 +481,8 @@
     // once the launch line is typed, drop the "launching …" hint (it used to stick
     // around forever on a plain ▾ launch); flows override this with their own step
     var thenCb = opts.then || function (){ setHint(''); };
-    afterFlush = function (){ agentLive = true; thenCb(); };   // the launch line is in the shell now
+    launchedAi = name; agentLive = false;
+    afterFlush = function (){ launchWatch = { name: name, at: Date.now(), bytes: 0 }; thenCb(); };   // judge the first output
     if (ws && ws.readyState === 1 && !awaitingReady) {
       spawned = false; awaitingReady = true;
       send({ type: 'respawn', cols: term ? term.cols : 80, rows: term ? term.rows : 24 });
@@ -533,7 +537,7 @@
   // drawer. Returns true if it reached a live shell, false if none is running yet.
   window.RR_submitCommand = function (cmd){
     // only into a live assistant: typing /setup into a bare shell leaves the busy box spinning forever
-    if (spawned && agentLive && ws && ws.readyState === 1) { typeCommand(flowCommand(chosenAi(), cmd)); return true; }   // two-phase submit
+    if (spawned && agentLive && ws && ws.readyState === 1) { typeCommand(flowCommand(launchedAi || chosenAi(), cmd)); return true; }   // two-phase submit, in the LAUNCHED assistant's syntax
     return false;
   };
 
@@ -762,6 +766,22 @@
   function clean1(s){ return String(s || '').replace(/[\r\n]+/g, ' ').trim(); }   // one line — a stray newline would submit early
   function headOk(url){ return fetch(url, { method: 'HEAD' }).then(function (r){ return r.ok; }).catch(function (){ return false; }); }
 
+  // After a launch line is flushed, the first output tells whether an assistant is really
+  // running: a "command not found" means it isn't installed (never type a flow command
+  // into the bare shell); a TUI taking the screen (or a burst of output) means it is.
+  function judgeLaunch(chunk){
+    var w = launchWatch; if (!w) return;
+    w.bytes += (chunk || '').length;
+    if (/command not found|is not recognized as an internal|No such file or directory|not found: /i.test(chunk || '')){
+      launchWatch = null; agentLive = false;
+      setHint(w.name + ' is not installed here — install it, then launch again'); keepHintUntil = Date.now() + 8000;
+      toast(w.name + ' isn’t installed (or not on PATH) — see the install steps in the README');
+      return;
+    }
+    if ((chunk && chunk.indexOf('\x1b[?1049h') !== -1) || w.bytes >= BOOT_BURST_BYTES || Date.now() - w.at > 8000){
+      launchWatch = null; agentLive = true;
+    }
+  }
   // run cb once the socket is connected and idle (no spawn handshake in flight), so
   // launchAgent takes the direct-respawn path even if a flow is started right at load.
   // Returns a cancel function: a Stop pressed while this wait is still pending must
@@ -826,8 +846,9 @@
   // has this assistant ever been launched by the app on this install? Its first start
   // in a folder typically shows a "trust this folder?" / login / onboarding dialog —
   // typing the flow command into that would answer the dialog instead of running.
-  function aiSeen(name){ return lsGet('rr-ai-ready:' + name, '') === '1'; }
-  function markAiSeen(name){ lsSet('rr-ai-ready:' + name, '1'); }
+  function aiKey(name){ return 'rr-ai-ready:' + name + '@' + WM.root + ':' + (WM.dir || ''); }   // per install AND per folder path
+  function aiSeen(name){ return lsGet(aiKey(name), '') === '1'; }
+  function markAiSeen(name){ lsSet(aiKey(name), '1'); }
   function runJob(spec){
     if (discuss) stopDiscussion();                    // one shared pty: a discussion can't survive the respawn
     job = { spec: spec, resultId: null, poll: null, sentAt: 0, warned: false, dog: null, started: false, token: null, wait: null };
@@ -1787,6 +1808,7 @@
   aiStatus().then(function (s){
     if (!s) return;
     if (s.startedAt) serverStartedAt = s.startedAt;   // baseline for restart detection
+    if (s.pythonOk === false) toast('Python 3 was not found — install it (python.org; macOS: xcode-select --install), then reopen Reading Room. Nothing can be built until then.');
     if (s.job && s.job.token) adoptJob(s.job);         // a run started from another page is still going
     if (s.restartPending && !s.job){                   // "Later" on an installed update — remind until restarted (not mid-run)
       if (s.restartable) toast('An update is installed — restart Reading Room to finish', 'Restart now', updRestart);

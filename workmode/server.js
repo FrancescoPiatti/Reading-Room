@@ -183,16 +183,18 @@ function which(cmd) {
 }
 
 function pythonCmd() {
-  for (const c of ['python3', 'python']) {
+  for (const c of ['python3', 'python', 'py']) {
     try {
       const r = spawnSync(c, ['--version'], { encoding: 'utf8' });
-      if (r.status === 0) return c;
+      if (r.status === 0 && /Python 3/.test((r.stdout || '') + (r.stderr || ''))) return c;
     } catch (e) {}
   }
-  return 'python3';
+  return null;
 }
 
-const PY = pythonCmd();
+const PY_FOUND = pythonCmd();
+const PY = PY_FOUND || 'python3';
+const PYTHON_OK = !!PY_FOUND;   // surfaced in /api/status → the page tells the reader plainly
 
 // Run a helper process (python / git / npm / pgrep) to completion with a HARD
 // timeout. Every child the API routes start goes through here: args are always an
@@ -286,7 +288,7 @@ function workmodeSnippet() {
     '<!-- Reading Room app client (injected by the local server; NOT in docs/ on disk) -->',
     '<link rel="stylesheet" href="/__workmode/vendor/xterm.css">',
     '<link rel="stylesheet" href="/__workmode/workmode.css">',
-    '<script>window.RR_WORKMODE = { ws: "/__workmode/ws", port: ' + ACTUAL_PORT + ', root: "' + REPO_KEY + '" };</script>',
+    '<script>window.RR_WORKMODE = { ws: "/__workmode/ws", port: ' + ACTUAL_PORT + ', root: "' + REPO_KEY + '", dir: "' + crypto.createHash('sha1').update(REPO).digest('hex').slice(0, 8) + '" };</script>',
     '<script src="/__workmode/vendor/xterm.js"></script>',
     '<script src="/__workmode/vendor/addon-fit.js"></script>',
     '<script src="/__workmode/workmode.js"></script>',
@@ -361,6 +363,7 @@ app.get('/api/status', (req, res) => {
     terminal: !!pty,
     ais: { claude: !!which('claude'), codex: !!which('codex'), gemini: !!which('gemini') },
     python: PY,
+    pythonOk: PYTHON_OK,
     startedAt: STARTED_AT,
     restartable: RESTARTABLE,
     restartPending,
@@ -726,6 +729,10 @@ function importZip(zipPath, mode, res) {
 const GIT_ENV = Object.assign({}, process.env, {
   GIT_TERMINAL_PROMPT: '0',
   GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || 'ssh -oBatchMode=yes',
+  // credential helpers (Git Credential Manager on Windows/macOS) prompt on their own —
+  // a hidden fetch must fail quietly rather than pop a sign-in window out of nowhere
+  GCM_INTERACTIVE: 'never',
+  GIT_CONFIG_PARAMETERS: ((process.env.GIT_CONFIG_PARAMETERS || '') + " 'credential.interactive=false'").trim(),
 });
 function gitP(args, timeoutMs) { return runP('git', args, { env: GIT_ENV, timeoutMs: timeoutMs || 15000 }); }
 function localVersion() {
@@ -1549,6 +1556,9 @@ function preflight() {
   }
   if (!pty) {
     console.log('  ! node-pty not installed — terminal disabled. Re-run `npm install` in workmode/.');
+  }
+  if (!PYTHON_OK) {
+    console.log('  ! Python 3 was not found (tried python3 / python / py) — the site cannot be built until it is installed.');
   }
 }
 

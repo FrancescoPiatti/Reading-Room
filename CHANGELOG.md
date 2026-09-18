@@ -5,6 +5,19 @@ names the current release; the app's update checker (avatar menu → **Updates**
 looks for a newer version — new commits on a clone's git remote, or a newer
 published release for a ZIP copy — and installs it in one click.
 
+## 1.2.2 — 2026-09-19
+
+- **Setup with Codex or Gemini.** Setup's auto-run now uses the syntax of the
+  assistant that was actually launched (`$setup` for Codex), only after the
+  assistant's screen is really up, and its Launch buttons grey out CLIs that aren't
+  installed; a missing CLI is reported instead of typing into a bare shell.
+- The "first launch" of an assistant is remembered per folder, so a moved or
+  re-cloned copy shows the terminal again for its trust prompt.
+- The hidden update check can no longer pop a credential-manager window; Python 3
+  is checked by the launchers and the app says plainly when it is missing.
+- Docs: `python3` in every command; macOS 15 Gatekeeper ("Open Anyway") and
+  Windows SmartScreen notes.
+
 ## 1.2.1 — 2026-09-19
 
 - **Codex and Gemini flows actually run.** Codex rejects unknown `/commands`

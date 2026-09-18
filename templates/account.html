@@ -960,6 +960,15 @@
       menu.appendChild(u);
     }
     profileMdBtn.hidden = false;
+    // Setup's Launch buttons: grey out assistants that aren't installed (same signal the
+    // flow pickers use), so nobody launches a missing CLI and then applies into a bare shell
+    fetch('/api/status').then(function (r){ return r.json(); }).then(function (st){
+      var ais = st && st.ais; if (!ais) return;
+      Array.prototype.forEach.call(launchWrap.querySelectorAll('[data-rr-agent]'), function (b){
+        var name = b.getAttribute('data-rr-agent');
+        if (ais[name] === false){ b.disabled = true; b.title = name + ' isn’t installed (or not on PATH) — see the install steps in the README'; b.textContent = name + ' — not installed'; }
+      });
+    }).catch(function (){});
   }
   function onReady(){ initApp(); checkFirstRun(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onReady);

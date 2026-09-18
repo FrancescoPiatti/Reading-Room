@@ -26,5 +26,5 @@ Removal is **destructive and irreversible** (this is a delete-safety check, **no
 Delete only the collected paths — remove the specific `reports/<id>/`, `papers/<id>.pdf`, `.cache/<id>.txt`, and `docs/papers/<id>/` you listed (and any comparison directories the user approved). Never use a broader glob or touch anything you did not list.
 
 ## Then rebuild and report back
-Run `python scripts/verify.py --build` (rebuilds `docs/` from what remains and runs QA). Fix any `✗` failures. Confirm the paper is gone from `docs/index.html`, the library, and the graph, and report exactly what was deleted (and any comparisons / citations affected).
+Run `python3 scripts/verify.py --build` (rebuilds `docs/` from what remains and runs QA). Fix any `✗` failures. Confirm the paper is gone from `docs/index.html`, the library, and the graph, and report exactly what was deleted (and any comparisons / citations affected).
 '''

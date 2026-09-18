@@ -30,6 +30,20 @@ if errorlevel 1 (
 
 for /f "delims=" %%v in ('node -v') do echo   node %%v
 
+REM Python 3 is the build (scripts\build.py) - say so now, not as a broken site later.
+python --version >nul 2>nul
+if errorlevel 1 (
+  py -3 --version >nul 2>nul
+  if errorlevel 1 (
+    echo.
+    echo   X  Python 3 is required but was not found.
+    echo      Install it from https://www.python.org/downloads/ ^(tick "Add python.exe to PATH"^), then run this again.
+    start "" "https://www.python.org/downloads/"
+    pause
+    exit /b 1
+  )
+)
+
 REM Require Node 18+ up front - a too-old Node fails cryptically mid-install.
 set "NODE_MAJOR="
 for /f "tokens=1 delims=v." %%m in ('node -v') do set "NODE_MAJOR=%%m"

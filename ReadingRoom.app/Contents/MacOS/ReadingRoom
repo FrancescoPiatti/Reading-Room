@@ -123,6 +123,12 @@ if ! have_node; then
   die "Reading Room needs Node.js, which was not found. Install it from nodejs.org (or: brew install node), then open Reading Room again."
 fi
 
+# --- Python 3 is the build (scripts/build.py) — say so now, not as a broken site later
+if ! python3 --version >/dev/null 2>&1; then
+  open "https://www.python.org/downloads/" >/dev/null 2>&1
+  die "Python 3 is required but was not found. Install it (python.org, or run  xcode-select --install  in Terminal), then open Reading Room again."
+fi
+
 # --- require Node >= 18 up front (a too-old Node would fail cryptically
 #     halfway through npm install instead of with a clear message) -----------
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null)"

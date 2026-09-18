@@ -117,5 +117,5 @@ If a paper genuinely needs a category the active vocabulary doesn't cover, propo
 - Be **grounded**: cite section/figure numbers in prose (e.g. "(§4.2)") since there's no auto-citation. If a number or claim is uncertain, say so rather than inventing it. Never fabricate metrics.
 
 ## Then build and report back
-Run `python scripts/verify.py --build` (builds, then runs QA). Fix any `✗` failures before continuing — only warnings are acceptable. Confirm `reports/<id>/digest.json` and `docs/papers/<id>/index.html` were written, and tell the user to open `docs/index.html` (or refresh it). Mention anything you skipped or were unsure about.
+Run `python3 scripts/verify.py --build` (builds, then runs QA). Fix any `✗` failures before continuing — only warnings are acceptable. Confirm `reports/<id>/digest.json` and `docs/papers/<id>/index.html` were written, and tell the user to open `docs/index.html` (or refresh it). Mention anything you skipped or were unsure about.
 '''

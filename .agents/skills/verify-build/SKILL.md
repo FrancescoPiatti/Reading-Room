@@ -12,10 +12,10 @@ Run the project's QA checker and act on what it finds. This catches the failure 
 From the repo root:
 
 ```
-python scripts/verify.py --build
+python3 scripts/verify.py --build
 ```
 
-`--build` runs `python scripts/build.py` first, then verifies the freshly generated `docs/`. Drop `--build` to check an already-built tree. Exit code is non-zero if any **failure** (not warning) is found.
+`--build` runs `python3 scripts/build.py` first, then verifies the freshly generated `docs/`. Drop `--build` to check an already-built tree. Exit code is non-zero if any **failure** (not warning) is found.
 
 ## Reading the output
 - `✓` pass · `!` warning (non-blocking, e.g. a digest missing the `significance` section) · `✗` failure.
@@ -26,7 +26,7 @@ python scripts/verify.py --build
 - Warnings are advisory — mention them to the user but they don't block.
 
 ## When to use
-- As the **last step** of `/explain-paper`, `/compare`, and `/learn`, in place of (or right after) a bare `python scripts/build.py`.
+- As the **last step** of `/explain-paper`, `/compare`, and `/learn`, in place of (or right after) a bare `python3 scripts/build.py`.
 - After any change to a **build input**: `scripts/build.py`, `templates/*` (incl. `templates/fields/*.json` and `account.html`), `base.css`, `user/config.json`, or a `digest.json` / `compare.json`.
 - **Decision rule:** edited a build input → run this before calling the task done.
 - **Skip it** when you only touched non-build files: `AGENTS.md`, `.agents/skills/*`, `.codex/config.*`, `user/profile.json`, or `scripts/verify.py` itself.
