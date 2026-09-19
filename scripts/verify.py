@@ -423,6 +423,39 @@ def check_scripts_balanced(r):
         r.ok("every page has balanced <script> tags")
 
 
+def check_executables(r):
+    """The launchers must be executable IN GIT, not just on this disk.
+
+    This repo lives on a cloud drive with `core.fileMode=false`, so git ignores the
+    filesystem bit entirely: a launcher added here is committed 100644 and a reader
+    who clones (or unzips a release) gets a file their desktop refuses to run.
+    `git update-index --chmod=+x <file>` is the fix.
+    """
+    r.section("Launcher permissions")
+    import subprocess
+    want = ["ReadingRoom.sh", "ReadingRoom.app/Contents/MacOS/ReadingRoom",
+            "assets/build-icon.sh", "scripts/package_release.sh"]
+    try:
+        out = subprocess.run(["git", "ls-files", "-s"] + want, cwd=str(ROOT),
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        r.warn(f"could not ask git about file modes ({e})")
+        return
+    if out.returncode != 0:
+        r.ok("not a git checkout — nothing to check")
+        return
+    seen = {}
+    for line in out.stdout.splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) == 2:
+            seen[parts[1].strip()] = parts[0].split()[0]
+    missing = [f for f in want if f in seen and seen[f] != "100755"]
+    for f in missing:
+        r.fail(f"{f} is committed as {seen[f]} — run: git update-index --chmod=+x {f}")
+    if not missing:
+        r.ok(f"{len(seen)} launcher/script file(s) executable in git")
+
+
 def check_gemini_commands(r):
     """Gemini CLI only loads .gemini/commands/*.toml; they are generated from the .md sources."""
     r.section("Gemini command files")
@@ -520,6 +553,7 @@ def main():
     check_scripts_balanced(r)
     check_cite_and_compares(r)
     check_gemini_commands(r)
+    check_executables(r)
     check_contrast(r)
 
     print(f"\n{'='*48}")
