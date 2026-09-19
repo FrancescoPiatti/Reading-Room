@@ -75,7 +75,13 @@ echo "  • zipping…"
 rm -f "$OUT"
 ( cd "$STAGE" && zip -q -r -y "$REPO/$OUT" "$NAME" -x '*.DS_Store' )
 [ "$KEEP" -eq 1 ] && trap - EXIT
-unzip -l "$OUT" | grep -q "$NAME/VERSION" || { echo "  ✗ the zip has no $NAME/VERSION — the updater would reject it"; exit 1; }
+# (no `| grep -q` here: grep exits early, unzip takes SIGPIPE, and pipefail turns a
+# perfectly good zip into a failure)
+LIST="$(unzip -l "$OUT")"
+case "$LIST" in
+  *"$NAME/VERSION"*) ;;
+  *) echo "  ✗ the zip has no $NAME/VERSION — the updater would reject it"; exit 1 ;;
+esac
 
 SIZE="$(du -h "$OUT" | cut -f1)"
 
