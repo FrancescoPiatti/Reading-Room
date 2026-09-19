@@ -629,6 +629,11 @@ mjx-container[display="true"] { margin: 0.6em 0 1.1em; }
 }
 .lib-group select:focus { outline: none; border-color: var(--accent); }
 
+/* graph nodes are keyboard-reachable (tabindex on each <g>) — make the focus visible */
+.node:focus { outline: none; }
+.node:focus circle { stroke: var(--accent); stroke-width: 3px; }
+.node:focus-visible circle { stroke: var(--accent); stroke-width: 3px; }
+
 .lib-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0 6px; }
 .lib-actions .spacer { flex: 1; }
 .lib-check { font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft);
@@ -950,6 +955,15 @@ body.rr-modal-open { overflow: hidden; }
 
   <div class="lib-bar">
     <input class="search" id="q" type="search" placeholder="Filter by title, author, venue, tag…" aria-label="Filter papers" autocomplete="off">
+    <label class="lib-group">Sort
+      <select id="sort">
+        <option value="year">Year (newest)</option>
+        <option value="updated">Recently updated</option>
+        <option value="title">Title A–Z</option>
+        <option value="prio">Priority</option>
+        <option value="status">Reading status</option>
+      </select>
+    </label>
     <label class="lib-group">Group by
       <select id="groupby">
         <option value="">Nothing</option>
@@ -983,7 +997,7 @@ body.rr-modal-open { overflow: hidden; }
 </main>
 
 <script>
-const LIBRARY = [{"id": "1706.03762", "title": "Attention Is All You Need", "authors": "Ashish Vaswani et al.", "year": 2017, "venue": "NeurIPS 2017", "status": "to-read", "tags": ["deep-learning", "natural-language-processing", "efficiency"], "primary_tag": "deep-learning", "bibkey": "vaswani2017attention", "bibtex": "@inproceedings{vaswani2017attention,\n  title = {Attention Is All You Need},\n  author = {Ashish Vaswani and Noam Shazeer and Niki Parmar and Jakob Uszkoreit and Llion Jones and Aidan N. Gomez and Łukasz Kaiser and Illia Polosukhin},\n  booktitle = {Advances in Neural Information Processing Systems 30 (NIPS 2017)},\n  year = {2017},\n  url = {https://arxiv.org/abs/1706.03762}\n}", "url": "papers/1706.03762/index.html"}, {"id": "hornik1989", "title": "Multilayer Feedforward Networks are Universal Approximators", "authors": "Kurt Hornik, Maxwell Stinchcombe, Halbert White", "year": 1989, "venue": "Neural Networks 2(5)", "status": "to-read", "tags": ["deep-learning", "theory"], "primary_tag": "deep-learning", "bibkey": "hornik1989multilayer", "bibtex": "@article{DBLP:journals/nn/HornikSW89,\n  author    = {Kurt Hornik and Maxwell B. Stinchcombe and Halbert White},\n  title     = {Multilayer feedforward networks are universal approximators},\n  journal   = {Neural Networks},\n  volume    = {2},\n  number    = {5},\n  pages     = {359--366},\n  year      = {1989},\n  url       = {https://doi.org/10.1016/0893-6080(89)90020-8},\n  doi       = {10.1016/0893-6080(89)90020-8}\n}", "url": "papers/hornik1989/index.html"}];
+const LIBRARY = [{"id": "1706.03762", "title": "Attention Is All You Need", "authors": "Ashish Vaswani et al.", "year": 2017, "venue": "NeurIPS 2017", "status": "to-read", "tags": ["deep-learning", "natural-language-processing", "efficiency"], "primary_tag": "deep-learning", "bibkey": "vaswani2017attention", "bibtex": "@inproceedings{vaswani2017attention,\n  title = {Attention Is All You Need},\n  author = {Ashish Vaswani and Noam Shazeer and Niki Parmar and Jakob Uszkoreit and Llion Jones and Aidan N. Gomez and Łukasz Kaiser and Illia Polosukhin},\n  booktitle = {Advances in Neural Information Processing Systems 30 (NIPS 2017)},\n  year = {2017},\n  url = {https://arxiv.org/abs/1706.03762}\n}", "tldr": "Replaces recurrence and convolution entirely with (multi-head) self-attention, yielding a sequence-transduction architecture — the Transformer — that is more parallelizable, trains in a fraction of the time, and sets new single-model state of the art on WMT 2014 translation (28.4 BLEU EN–DE, 41.8 BLEU EN–FR).", "updated": 1789235397, "url": "papers/1706.03762/index.html"}, {"id": "hornik1989", "title": "Multilayer Feedforward Networks are Universal Approximators", "authors": "Kurt Hornik, Maxwell Stinchcombe, Halbert White", "year": 1989, "venue": "Neural Networks 2(5)", "status": "to-read", "tags": ["deep-learning", "theory"], "primary_tag": "deep-learning", "bibkey": "hornik1989multilayer", "bibtex": "@article{DBLP:journals/nn/HornikSW89,\n  author    = {Kurt Hornik and Maxwell B. Stinchcombe and Halbert White},\n  title     = {Multilayer feedforward networks are universal approximators},\n  journal   = {Neural Networks},\n  volume    = {2},\n  number    = {5},\n  pages     = {359--366},\n  year      = {1989},\n  url       = {https://doi.org/10.1016/0893-6080(89)90020-8},\n  doi       = {10.1016/0893-6080(89)90020-8}\n}", "tldr": "Single-hidden-layer feedforward networks with an arbitrary squashing activation can approximate any continuous function uniformly on compacta and any Borel measurable function in probability — so failures in practice must come from learning, too few hidden units, or noise, never from the architecture class itself.", "updated": 1789235397, "url": "papers/hornik1989/index.html"}];
 
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 const STATUS_LABELS = {'to-read':'To read','reading':'Reading','read':'Read'};
@@ -1027,13 +1041,29 @@ function addCustomTag(id, t){ const a = customTagsOf(id); a.push(t); setCustomTa
 function removeCustomTag(id, t){ setCustomTags(id, customTagsOf(id).filter(x => x !== t)); }
 function allCollections(){ const m = {}; LIBRARY.forEach(p => customTagsOf(p.id).forEach(t => { m[t] = (m[t]||0)+1; })); return m; }
 
+// sort order — this browser's preference (the grouping applies on top of it)
+const sortEl = document.getElementById('sort');
+const STATUS_ORDER = {'reading': 0, 'to-read': 1, 'read': 2};
+function sortList(list){
+  const by = {
+    year:    (a,b) => (b.year||0) - (a.year||0) || a.title.localeCompare(b.title),
+    updated: (a,b) => (b.updated||0) - (a.updated||0) || a.title.localeCompare(b.title),
+    title:   (a,b) => a.title.localeCompare(b.title),
+    prio:    (a,b) => prioOf(b) - prioOf(a) || (b.year||0) - (a.year||0),
+    status:  (a,b) => (STATUS_ORDER[statusOf(a)] - STATUS_ORDER[statusOf(b)]) || (b.year||0) - (a.year||0),
+  }[(sortEl && sortEl.value) || 'year'];
+  return by ? list.slice().sort(by) : list;
+}
 function visible(){
   let list = LIBRARY.slice();
   if (activeCollection) list = list.filter(p => customTagsOf(p.id).indexOf(activeCollection) !== -1);
   const q = qEl.value.trim().toLowerCase();
+  // the filter reaches the id, the year and the one-line summary as well as the
+  // obvious fields — "the 2019 paper about control variates" should find itself
   if (q) list = list.filter(p =>
-    (p.title + ' ' + p.authors + ' ' + p.venue + ' ' + (p.tags||[]).join(' ') + ' ' + customTagsOf(p.id).join(' ')).toLowerCase().includes(q));
-  return list;
+    (p.title + ' ' + p.authors + ' ' + p.venue + ' ' + p.id + ' ' + (p.year || '') + ' ' + (p.tldr || '')
+     + ' ' + (p.tags||[]).join(' ') + ' ' + customTagsOf(p.id).join(' ')).toLowerCase().includes(q));
+  return sortList(list);
 }
 
 function row(p){
@@ -1207,8 +1237,18 @@ document.getElementById('dlbib').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
+// the sort choice rides along in this browser (a view preference, like the theme)
+function restoreSort(){
+  if (!sortEl) return;
+  try { const s = localStorage.getItem('rr-sort'); if (s && [].some.call(sortEl.options, o => o.value === s)) sortEl.value = s; } catch(e){}
+}
+restoreSort();
 qEl.addEventListener('input', render);
 groupEl.addEventListener('change', render);
+if (sortEl) sortEl.addEventListener('change', function(){
+  try { localStorage.setItem('rr-sort', sortEl.value); } catch(e){}
+  render();
+});
 renderAll();
 
 // theme toggle — persists to localStorage, light is default
@@ -1271,6 +1311,8 @@ renderAll();
 .rr-bk-sub { margin-left: auto; padding-left: 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 58%; }
 .rr-bk-sub:empty { display: none; }
 .rr-bk-custom { margin-top: 8px; font-family: var(--mono); font-size: 13px; }
+.rr-bk-auto { display: flex; align-items: center; gap: 10px; padding: 7px 10px; font-size: 13.5px; }
+.rr-bk-select { width: auto; min-width: 140px; padding: 6px 10px; font-size: 13px; font-family: var(--mono); }
 .rr-bk-custom[hidden] { display: none; }
 .rr-bk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .rr-bk-row .rr-q-note { margin: 0; flex: 1 1 100%; line-height: 1.5; word-break: break-word; }
@@ -1361,6 +1403,20 @@ renderAll();
           <button type="button" class="rr-btn rr-btn-ghost" id="rr-backup-zip-reveal" hidden>Show in folder</button>
           <p class="rr-q-note" id="rr-backup-zip-msg" hidden></p>
         </div>
+        <p class="rr-bk-label">Automatic backups</p>
+        <div class="rr-bk-row">
+          <label class="rr-q-choice rr-bk-auto">
+            <span>Back up on its own</span>
+            <select class="rr-q-input rr-bk-select" id="rr-backup-auto">
+              <option value="0">Never</option>
+              <option value="1">Every day</option>
+              <option value="7">Every week</option>
+              <option value="30">Every month</option>
+            </select>
+          </label>
+          <p class="rr-q-note" id="rr-backup-auto-msg" hidden></p>
+        </div>
+        <p class="rr-q-hint">Automatic backups skip the PDFs (they can be downloaded again), land in the app’s backups folder, and only the five newest are kept. One is also written right before every update.</p>
       </section>
       <section class="rr-bk-sec" id="rr-backup-restore" hidden>
         <h3 class="rr-bk-h">Restore from zip</h3>
@@ -1379,7 +1435,8 @@ renderAll();
       </section>
       <section class="rr-bk-sec">
         <h3 class="rr-bk-h">Browser reading state only (JSON)</h3>
-        <p class="rr-q-hint">Your <b>reading status</b>, <b>priority stars</b>, <b>custom tags / collections</b>, dismissed graph nodes, and theme are stored in this browser only. Export them to a small JSON file to move them to another browser or device, or as a backup.</p>
+        <p class="rr-q-hint">Your <b>reading status</b>, <b>priority stars</b>, <b>custom tags / collections</b>, dismissed graph nodes, and theme live in this browser. Export them to a small JSON file to move them to another browser or device, or as a backup.</p>
+        <p class="rr-q-hint" id="rr-backup-state-hint" hidden>In the app they are also saved to <code>user/reading-state.json</code> as you go, so they survive a new browser, a different port, and a restore — this export is for moving them somewhere the app isn’t.</p>
         <p class="rr-q-hint" id="rr-backup-static-hint">Your analysed papers, comparisons and discussions are files on disk. The full zip backup — and restore — lives in the Reading Room app (avatar menu → Back up); from an assistant, <code>/backup export</code> writes the same zip.</p>
         <div class="rr-bk-row">
           <button type="button" class="rr-btn" id="rr-backup-export">Export JSON</button>
@@ -1477,6 +1534,10 @@ renderAll();
     else if (which === 'updates') {                 // app only (item added in initApp)
       if (typeof window.RR_openUpdates === 'function') window.RR_openUpdates(true);
       else flash('Checking for updates needs the app — open ReadingRoom.app (or ReadingRoom.bat).');
+    }
+    else if (which === 'diagnostics') {             // app only (item added in initApp)
+      if (typeof window.RR_openDiagnostics === 'function') window.RR_openDiagnostics();
+      else flash('Diagnostics need the app — open ReadingRoom.app (or ReadingRoom.bat).');
     }
     else openSetup();
   });
@@ -1616,6 +1677,8 @@ renderAll();
   var bkZipNameEl   = document.getElementById('rr-backup-zip-name');
   var bkImportBtn   = document.getElementById('rr-backup-zip-import');
   var bkRestoreMsgEl= document.getElementById('rr-backup-restore-msg');
+  var bkAutoEl      = document.getElementById('rr-backup-auto');
+  var bkAutoMsgEl   = document.getElementById('rr-backup-auto-msg');
   var bkZipFileEl   = document.getElementById('rr-backup-zipfile');
   function isStateKey(k){ return /^rr-(status|prio|tags)-/.test(k) || k === 'rr-dismissed' || k === 'rr-theme'; }
   function stateKeys(){
@@ -1652,12 +1715,32 @@ renderAll();
     if (wm) {
       noteMsg(bkZipMsgEl, ''); noteMsg(bkRestoreMsgEl, '');
       bkRevealBtn.hidden = true; lastZip = null; bkExportBtn.disabled = false;
-      resetPick(); loadBackupInfo();
+      resetPick(); loadBackupInfo(); loadBackupPrefs();
     }
     openModal(backupModal);
   }
 
   /* ---- full zip (app only) ---- */
+  function loadBackupPrefs(){
+    if (!bkAutoEl) return;
+    noteMsg(bkAutoMsgEl, '');
+    fetch('/api/backup/prefs').then(asJson).then(function (j){
+      if (!j || !j.ok) return;
+      bkAutoEl.value = String(j.autoBackupDays || 0);
+      if (j.lastBackupAgeDays != null) noteMsg(bkAutoMsgEl, j.lastBackupAgeDays === 0 ? 'Last backup: today' : ('Last backup: ' + j.lastBackupAgeDays + ' day' + (j.lastBackupAgeDays === 1 ? '' : 's') + ' ago'));
+    }).catch(function (){});
+  }
+  if (bkAutoEl) bkAutoEl.addEventListener('change', function (){
+    var v = parseInt(bkAutoEl.value, 10) || 0;
+    bkAutoEl.disabled = true;
+    fetch('/api/backup/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoBackupDays: v }) })
+      .then(asJson).then(function (j){
+        bkAutoEl.disabled = false;
+        if (!j || !j.ok) throw new Error((j && j.error) || 'could not save');
+        noteMsg(bkAutoMsgEl, v ? ('Backing up every ' + (v === 1 ? 'day' : v === 7 ? 'week' : 'month') + '.') : 'Automatic backups are off.');
+      }).catch(function (e){ bkAutoEl.disabled = false; noteMsg(bkAutoMsgEl, 'Couldn’t save that — ' + e.message, true); });
+  });
+
   function loadBackupInfo(){
     bkCountsEl.textContent = 'Counting your library…';
     fetch('/api/backup/info').then(asJson).then(function (j){
@@ -2180,13 +2263,17 @@ renderAll();
   // only when the page is served by the app. The static site never shows them.
   function initApp(){
     if (!window.RR_WORKMODE) return;
-    if (!menu.querySelector('[data-acct="updates"]')) {
+    [['updates', 'Updates'], ['diagnostics', 'Diagnostics']].forEach(function (it){
+      if (menu.querySelector('[data-acct="' + it[0] + '"]')) return;
       var u = document.createElement('button');
       u.type = 'button'; u.className = 'rr-acct-item';
-      u.setAttribute('data-acct', 'updates'); u.setAttribute('role', 'menuitem');
-      u.textContent = 'Updates';
+      u.setAttribute('data-acct', it[0]); u.setAttribute('role', 'menuitem');
+      u.textContent = it[1];
       menu.appendChild(u);
-    }
+    });
+    // under the app the reading state is saved in the library folder, not just here
+    var stateHint = document.getElementById('rr-backup-state-hint');
+    if (stateHint) stateHint.hidden = false;
     profileMdBtn.hidden = false;
     // Setup's Launch buttons: grey out assistants that aren't installed (same signal the
     // flow pickers use), so nobody launches a missing CLI and then applies into a bare shell

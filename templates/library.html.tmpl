@@ -41,6 +41,15 @@
 
   <div class="lib-bar">
     <input class="search" id="q" type="search" placeholder="Filter by title, author, venue, tag…" aria-label="Filter papers" autocomplete="off">
+    <label class="lib-group">Sort
+      <select id="sort">
+        <option value="year">Year (newest)</option>
+        <option value="updated">Recently updated</option>
+        <option value="title">Title A–Z</option>
+        <option value="prio">Priority</option>
+        <option value="status">Reading status</option>
+      </select>
+    </label>
     <label class="lib-group">Group by
       <select id="groupby">
         <option value="">Nothing</option>
@@ -118,13 +127,29 @@ function addCustomTag(id, t){ const a = customTagsOf(id); a.push(t); setCustomTa
 function removeCustomTag(id, t){ setCustomTags(id, customTagsOf(id).filter(x => x !== t)); }
 function allCollections(){ const m = {}; LIBRARY.forEach(p => customTagsOf(p.id).forEach(t => { m[t] = (m[t]||0)+1; })); return m; }
 
+// sort order — this browser's preference (the grouping applies on top of it)
+const sortEl = document.getElementById('sort');
+const STATUS_ORDER = {'reading': 0, 'to-read': 1, 'read': 2};
+function sortList(list){
+  const by = {
+    year:    (a,b) => (b.year||0) - (a.year||0) || a.title.localeCompare(b.title),
+    updated: (a,b) => (b.updated||0) - (a.updated||0) || a.title.localeCompare(b.title),
+    title:   (a,b) => a.title.localeCompare(b.title),
+    prio:    (a,b) => prioOf(b) - prioOf(a) || (b.year||0) - (a.year||0),
+    status:  (a,b) => (STATUS_ORDER[statusOf(a)] - STATUS_ORDER[statusOf(b)]) || (b.year||0) - (a.year||0),
+  }[(sortEl && sortEl.value) || 'year'];
+  return by ? list.slice().sort(by) : list;
+}
 function visible(){
   let list = LIBRARY.slice();
   if (activeCollection) list = list.filter(p => customTagsOf(p.id).indexOf(activeCollection) !== -1);
   const q = qEl.value.trim().toLowerCase();
+  // the filter reaches the id, the year and the one-line summary as well as the
+  // obvious fields — "the 2019 paper about control variates" should find itself
   if (q) list = list.filter(p =>
-    (p.title + ' ' + p.authors + ' ' + p.venue + ' ' + (p.tags||[]).join(' ') + ' ' + customTagsOf(p.id).join(' ')).toLowerCase().includes(q));
-  return list;
+    (p.title + ' ' + p.authors + ' ' + p.venue + ' ' + p.id + ' ' + (p.year || '') + ' ' + (p.tldr || '')
+     + ' ' + (p.tags||[]).join(' ') + ' ' + customTagsOf(p.id).join(' ')).toLowerCase().includes(q));
+  return sortList(list);
 }
 
 function row(p){
@@ -298,8 +323,18 @@ document.getElementById('dlbib').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
+// the sort choice rides along in this browser (a view preference, like the theme)
+function restoreSort(){
+  if (!sortEl) return;
+  try { const s = localStorage.getItem('rr-sort'); if (s && [].some.call(sortEl.options, o => o.value === s)) sortEl.value = s; } catch(e){}
+}
+restoreSort();
 qEl.addEventListener('input', render);
 groupEl.addEventListener('change', render);
+if (sortEl) sortEl.addEventListener('change', function(){
+  try { localStorage.setItem('rr-sort', sortEl.value); } catch(e){}
+  render();
+});
 renderAll();
 
 // theme toggle — persists to localStorage, light is default

@@ -44,9 +44,54 @@
   var CHAT_ID = (location.pathname.match(/\/chat\/([^/]+)\//) || [])[1];
   if (REPORT_ID) { try { REPORT_ID = decodeURIComponent(REPORT_ID); } catch (e) {} }
   var LS_H = 'rr-wm-h';                         // drawer height persists (open/closed deliberately does NOT)
+  var LS_SR = 'rr-wm-sr';                       // xterm screen-reader mode (assistant settings)
 
   function lsGet(k, d){ try { var v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } }
   function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+
+  /* ---- reading state: keep the file on disk in step with this browser ----
+     Status, priority, collections, ghost dismissals and the theme live in
+     localStorage, which the browser scopes to the ORIGIN — port included. The app
+     falls back to the next free port when 4317 is busy, and the library then came
+     up unread with the tutorial back. The server seeds every page from
+     user/reading-state.json in <head> (window.RR_STATE); from here on every write
+     to one of those keys goes back to it. localStorage stays the read path. */
+  var STATE_RE = /^rr-(?:status|prio|tags)-|^rr-(?:dismissed|theme)$/;
+  (function syncReadingState(){
+    var LS; try { LS = window.localStorage; } catch (e) { return; }
+    if (!LS || typeof LS.setItem !== 'function') return;
+    var queue = { set: {}, remove: [] }, timer = null;
+    function flush(keepalive){
+      timer = null;
+      var body = queue; queue = { set: {}, remove: [] };
+      if (!Object.keys(body.set).length && !body.remove.length) return;
+      try {
+        fetch('/api/reading-state', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body), keepalive: !!keepalive }).catch(function (){});
+      } catch (e) {}
+    }
+    function queueKey(k, v, del){
+      if (!STATE_RE.test(k)) return;
+      if (del) { delete queue.set[k]; queue.remove.push(k); }
+      else { queue.set[k] = String(v); }
+      if (!timer) timer = setTimeout(flush, 250);       // coalesce a burst of stars
+    }
+    var origSet = LS.setItem, origRemove = LS.removeItem;
+    try {
+      LS.setItem = function (k, v){ origSet.call(LS, k, v); queueKey(k, v, false); };
+      LS.removeItem = function (k){ origRemove.call(LS, k); queueKey(k, null, true); };
+    } catch (e) { return; }                              // locked-down browser: reads still work
+    // First run under a server that has no file yet, in a browser that already has
+    // state (an older copy of the app): seed the file from here instead of starting blank.
+    var seeded = window.RR_STATE && Object.keys(window.RR_STATE).length;
+    if (!seeded){
+      var mine = {}, n = 0;
+      try { for (var i = 0; i < LS.length; i++){ var k = LS.key(i); if (k && STATE_RE.test(k)) { mine[k] = LS.getItem(k); n++; } } } catch (e) {}
+      if (n){ queue.set = mine; if (!timer) timer = setTimeout(flush, 250); }
+    }
+    window.addEventListener('pagehide', function (){ if (timer){ clearTimeout(timer); flush(true); } });
+  })();
+
 
   /* ---------------------------------------------------------------- icons */
   function svg(p){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + p + '</svg>'; }
@@ -166,6 +211,10 @@
     notesBtn.title = 'Your own notes for this paper (reports/<id>/notes.md) — rendered under "My notes"';
     notesBtn.addEventListener('click', function (){ editNotes(REPORT_ID); });
     launch.appendChild(notesBtn);
+    var rmPaperBtn = el('button', 'rr-wm-btn', ICO_CLR + '<span>Remove paper</span>'); rmPaperBtn.type = 'button';
+    rmPaperBtn.title = 'Delete this paper’s report, PDF and page (asks first)';
+    rmPaperBtn.addEventListener('click', function (){ removePaper(REPORT_ID); });
+    launch.appendChild(rmPaperBtn);
   }
   if (CHAT_ID) {                                   // reading a discussion -> offer to remove it (no terminal needed)
     var rmBtn = el('button', 'rr-wm-btn', ICO_CLR + '<span>Remove discussion</span>'); rmBtn.type = 'button';
@@ -237,6 +286,7 @@
   var pending = [];                              // input queued before the shell is ready (latest request wins)
   // shared "hidden run" flow state (Analyze / Compare / Deep dive) — see the Flows section below
   var job = null;                                // the active hidden job, or null
+  var runTick = null;                            // 1 s timer updating the run card's elapsed/last-line
   var jobStatusText = '';                        // last status line (re-shown if you reopen the overlay mid-run)
   var activeArm = null;                          // current boot-wait controller (note() on shell output)
   var flowOv = null;                             // the shared full-screen flow overlay
@@ -253,6 +303,7 @@
                                                  // un-run pre-typed command never accumulates with the next
   var reconnectTimer = null, reconnectDelay = 1500;
 
+  function srMode(){ return lsGet(LS_SR, '0') === '1'; }
   function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
   function xtermTheme(){
     return {
@@ -269,7 +320,10 @@
     term = new window.Terminal({
       fontFamily: cssVar('--mono') || 'JetBrains Mono, ui-monospace, Menlo, monospace',
       fontSize: 13, cursorBlink: true, scrollback: 5000, theme: xtermTheme(),
+      screenReaderMode: srMode(),
     });
+    termWrap.setAttribute('role', 'group');
+    termWrap.setAttribute('aria-label', 'Assistant terminal');
     var FitCtor = (window.FitAddon && window.FitAddon.FitAddon) || window.FitAddon;
     if (FitCtor) { fit = new FitCtor(); term.loadAddon(fit); }
     term.open(termWrap);
@@ -293,6 +347,8 @@
       if (m.type === 'data') {
         if (term) term.write(m.data);
         lastPtyData = Date.now();
+        if (job && job.started) noteOutput(m.data);     // run card: "still working, this is the last thing it said"
+
         if (launchWatch) judgeLaunch(m.data);
         if (activeArm && !activeArm.sent()) activeArm.note(m.data);
         // belt-and-braces: the assistant producing output IS the launch happening —
@@ -841,6 +897,27 @@
   // in the terminal ('exited') — rolls the library back to that snapshot, so a
   // half-written report never lingers. `stopping` holds the run whose rollback we
   // are waiting on (job-stopped).
+  // The last readable line the assistant printed — shown on the run card so a long
+  // job looks supervised instead of hung. TUIs redraw whole screens, so strip the
+  // escape sequences and keep the last line that actually reads like a sentence.
+  var lastOutLine = '';
+  function noteOutput(s){
+    var t = String(s == null ? '' : s)
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')       // OSC (window titles)
+      .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '')              // CSI (colour, cursor)
+      .replace(/\x1b[()][0-9A-Za-z]/g, '')
+      .replace(/[\r\x00-\x08\x0b-\x1f\x7f]/g, '\n');
+    var lines = t.split('\n');
+    for (var i = lines.length - 1; i >= 0; i--){
+      var ln = lines[i].replace(/[─-╿▀-▟]/g, ' ').trim();   // box drawing
+      if (ln.length > 3 && /[A-Za-z]{3}/.test(ln)) { lastOutLine = ln.slice(0, 140); return; }
+    }
+  }
+  function fmtElapsed(ms){
+    var s = Math.max(0, Math.round(ms / 1000));
+    var m = Math.floor(s / 60);
+    return m ? (m + 'm ' + (s % 60) + 's') : (s + 's');
+  }
   var JOB_QUIET_WARN_MS = 90000;   // pty silent this long mid-job -> the assistant is probably waiting
   var stopping = null;             // { spec, text, timer } between job-stop and the server's job-stopped
   // has this assistant ever been launched by the app on this install? Its first start
@@ -930,6 +1007,7 @@
     job = null;
     if (!sp) return;
     if (j.started) send({ type: 'job-end', token: j.token });      // result verified → the server drops its snapshot
+    if (sp.onDone && sp.onDone(id) === true) return;              // a queue renders its own progress
     if (flowOv && flowOv.classList.contains('rr-show')) showFlowDone(sp, id, url);
     else toast(sp.doneToast(id), 'Open', function (){ location.href = url; });
   }
@@ -1004,6 +1082,206 @@
     else if (discuss) discussOnExit('The assistant was quit before the discussion was saved — nothing was added to your library.');
   }
 
+  /* ---- Remove a paper (report page) ---------------------------------------
+     The same paths /remove deletes — digest folder, PDF, cached text, generated
+     page. The server answers with the plan first, so the confirm can name exactly
+     what goes and warn about comparisons and citations that point at it. */
+  function removePaper(id){
+    fetch('/api/remove-paper', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) })
+      .then(function (r){ return r.json(); })
+      .then(function (p){
+        if (!p || !p.ok) throw new Error((p && p.error) || 'could not read this paper');
+        showRemovePaper(id, p);
+      })
+      .catch(function (e){ toast('Couldn’t remove this paper — ' + e.message); });
+  }
+  function showRemovePaper(id, plan){
+    buildFlowOverlay();
+    flowOv._title.textContent = 'Remove paper'; flowOv._showTerm.hidden = true;
+    var card = flowOv._card; card.innerHTML = '';
+    heads(card, 'Remove “' + (plan.title || id) + '”?', 'This deletes the paper’s files and its page. It cannot be undone.');
+    var list = el('ul', 'rr-rm-list');
+    (plan.paths || []).forEach(function (p){ var li = el('li'); li.textContent = p; list.appendChild(li); });
+    card.appendChild(list);
+    var alsoCmp = null;
+    if (plan.compares && plan.compares.length){
+      var lbl = el('label', 'rr-rm-check');
+      alsoCmp = el('input'); alsoCmp.type = 'checkbox';
+      lbl.appendChild(alsoCmp);
+      lbl.appendChild(el('span', '', 'Also remove ' + plan.compares.length + ' comparison' + (plan.compares.length === 1 ? '' : 's') + ' built on it (' + plan.compares.map(esc).join(', ') + '). Left alone, they render with a gap.'));
+      card.appendChild(lbl);
+    }
+    if (plan.citedBy && plan.citedBy.length){
+      card.appendChild(noteEl('Cited by ' + plan.citedBy.length + ' other paper' + (plan.citedBy.length === 1 ? '' : 's') + ' in your library — it may come back as a hollow node in Connections, which you can dismiss there.'));
+    }
+    var actions = el('div', 'rr-analyze-actions rr-analyze-actions--center');
+    var go = el('button', 'rr-wm-btn rr-wm-danger', ICO_CLR + '<span>Remove</span>'); go.type = 'button';
+    var no = el('button', 'rr-wm-btn', '<span>Keep it</span>'); no.type = 'button';
+    no.addEventListener('click', closeFlow);
+    go.addEventListener('click', function (){
+      go.disabled = true; no.disabled = true;
+      setJobStatus('Removing “' + (plan.title || id) + '” …');
+      renderRun(card, true);
+      fetch('/api/remove-paper', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: id, confirm: true, compares: !!(alsoCmp && alsoCmp.checked) }) })
+        .then(function (r){ return r.json(); })
+        .then(function (j){
+          if (!j || !j.ok) throw new Error((j && j.error) || 'remove failed');
+          location.href = '/';                 // the page we are on has just been deleted
+        })
+        .catch(function (e){ showFlowStopped({ title: 'Remove paper' }, 'Couldn’t remove it — ' + e.message); });
+    });
+    actions.appendChild(go); actions.appendChild(no);
+    card.appendChild(actions);
+    flowOv.classList.add('rr-show'); document.body.classList.add('rr-pdf-open');
+  }
+
+  /* ---- Diagnostics --------------------------------------------------------
+     Everything a "it doesn't work" message needs: versions, what was found on
+     PATH, how this copy was installed, and the tail of the server log. */
+  var diagOv = null;
+  function openDiagnostics(){
+    if (!diagOv){
+      diagOv = el('div', 'rr-analyze-overlay');
+      var bar = el('div', 'rr-pdf-bar');
+      var back = el('button', 'rr-wm-btn', ICO_BACK + '<span>Back</span>'); back.type = 'button';
+      back.addEventListener('click', function (){ diagOv.classList.remove('rr-show'); document.body.classList.remove('rr-pdf-open'); });
+      var t = el('span', 'rr-pdf-title', 'Diagnostics');
+      var sp = el('span', 'rr-wm-spacer');
+      var copy = el('button', 'rr-wm-btn', ICO_DOC + '<span>Copy</span>'); copy.type = 'button';
+      copy.addEventListener('click', function (){
+        var txt = diagOv._text || '';
+        function done(){ copy.querySelector('span').textContent = 'Copied'; setTimeout(function (){ copy.querySelector('span').textContent = 'Copy'; }, 1500); }
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(done, function (){ toast('Couldn’t copy — select the text instead'); });
+        else toast('Couldn’t copy — select the text instead');
+      });
+      bar.appendChild(back); bar.appendChild(t); bar.appendChild(sp); bar.appendChild(copy);
+      var body = el('div', 'rr-analyze-body');
+      var card = el('div', 'rr-analyze-card rr-diag-card');
+      body.appendChild(card);
+      diagOv.appendChild(bar); diagOv.appendChild(body);
+      document.body.appendChild(diagOv);
+      diagOv._card = card;
+    }
+    var card = diagOv._card;
+    card.innerHTML = '';
+    heads(card, 'Diagnostics', 'What this copy is running, and the last lines of its log.');
+    card.appendChild(el('div', 'rr-analyze-sub2', 'Loading…'));
+    diagOv.classList.add('rr-show'); document.body.classList.add('rr-pdf-open');
+    fetch('/api/diagnostics').then(function (r){ return r.json(); }).then(function (d){
+      if (!d || !d.ok) throw new Error((d && d.error) || 'no answer');
+      renderDiag(card, d);
+    }).catch(function (e){
+      card.innerHTML = '';
+      heads(card, 'Diagnostics', 'Couldn’t read the app’s status — ' + e.message);
+    });
+  }
+  function renderDiag(card, d){
+    card.innerHTML = '';
+    heads(card, 'Diagnostics', 'What this copy is running, and the last lines of its log.');
+    var rows = [
+      ['Reading Room', (d.app.version || '?') + (d.app.tag ? ('  (' + d.app.tag + ')') : '') + ' · installed with ' + (d.app.install === 'git' ? 'git' : 'a ZIP download')
+        + (d.app.commit ? ('  · ' + d.app.commit + (d.app.branch ? ('@' + d.app.branch) : '')) : '')],
+      ['Folder', d.app.repo],
+      ['Serving', 'http://127.0.0.1:' + d.app.port + '  · since ' + String(d.app.startedAt || '').replace('T', ' ').slice(0, 19)
+        + (d.app.restartable ? ' · can restart itself' : ' · started without the launcher')],
+      ['Terminal', d.app.terminal ? 'ready' : 'not available (node-pty failed to build — the flows need it)'],
+      ['System', d.env.platform + ' ' + d.env.arch + ' · Node ' + d.env.node + (d.env.npm ? (' · npm ' + d.env.npm) : '')],
+      ['Python', d.env.pythonOk ? (d.env.python || d.env.pythonCmd) : 'NOT FOUND — the site cannot be rebuilt (install Python 3)'],
+      ['Assistants', ['claude', 'codex', 'gemini'].map(function (n){
+        return n + ': ' + (d.env.ais[n] ? d.env.ais[n] : (d.env.found[n] ? 'installed' : 'not installed'));
+      }).join('\n')],
+      ['Library', d.library.reports + ' papers · ' + d.library.comparisons + ' comparisons · ' + d.library.discussions + ' discussions · '
+        + d.library.pdfs + ' PDFs · ' + d.library.backups + ' backup zips'],
+    ];
+    var tbl = el('div', 'rr-diag');
+    rows.forEach(function (r){
+      var row = el('div', 'rr-diag-row');
+      var k = el('div', 'rr-diag-k'); k.textContent = r[0];
+      var v = el('div', 'rr-diag-v'); v.textContent = r[1];
+      row.appendChild(k); row.appendChild(v); tbl.appendChild(row);
+    });
+    card.appendChild(tbl);
+    var logHead = el('div', 'rr-analyze-label'); logHead.textContent = 'Server log (last ' + (d.log || []).length + ' lines)';
+    card.appendChild(logHead);
+    var pre = el('pre', 'rr-diag-log'); pre.textContent = (d.log || []).join('\n') || '(the log is empty — this server is running in the foreground)';
+    card.appendChild(pre);
+    diagOv._text = rows.map(function (r){ return r[0] + ': ' + r[1]; }).join('\n') + '\n\n--- log ---\n' + ((d.log || []).join('\n'));
+  }
+  window.RR_openDiagnostics = openDiagnostics;
+
+  /* ---- the full-screen panels are dialogs --------------------------------
+     Analyze/Compare/Deep dive, the PDF reader, the notes and profile editors and
+     Diagnostics are plain divs that slide over the page, so a keyboard had nothing
+     to hold on to: focus stayed behind them and Tab wandered into the page they
+     cover. One observer gives every panel — including ones built later — a dialog
+     role, moves focus in, traps Tab, and hands focus back on the way out. */
+  var PANEL_SEL = '.rr-analyze-overlay, .rr-pdf-overlay, .rr-notes-overlay';
+  (function panelA11y(){
+    if (!window.MutationObserver) return;
+    var prevFocus = null, current = null;
+    function labelOf(p){
+      var t = p.querySelector('.rr-pdf-title');
+      var s = t && t.textContent ? t.textContent.trim() : '';
+      return s || 'Reading Room';
+    }
+    function focusables(p){
+      return Array.prototype.filter.call(
+        p.querySelectorAll('button, input, textarea, select, a[href], [tabindex]:not([tabindex="-1"])'),
+        function (e){ return !e.disabled && !e.hidden && e.offsetParent !== null; });
+    }
+    function enter(p){
+      if (current === p) return;
+      prevFocus = document.activeElement;
+      current = p;
+      p.setAttribute('role', 'dialog');
+      p.setAttribute('aria-modal', 'true');
+      p.setAttribute('aria-label', labelOf(p));
+      setTimeout(function (){
+        if (current !== p) return;
+        var pref = p.querySelector('.rr-analyze-input, textarea') || focusables(p)[0];
+        if (pref && pref.focus) { try { pref.focus(); } catch (e) {} }
+      }, 40);
+    }
+    function leave(p){
+      if (current !== p) return;
+      current = null;
+      p.removeAttribute('aria-modal');
+      if (prevFocus && prevFocus.focus && document.contains(prevFocus)) { try { prevFocus.focus(); } catch (e) {} }
+      prevFocus = null;
+    }
+    function sweep(){
+      Array.prototype.forEach.call(document.querySelectorAll(PANEL_SEL), function (p){
+        if (p.classList.contains('rr-show')) enter(p); else leave(p);
+      });
+    }
+    var mo = new MutationObserver(sweep);
+    function watch(){
+      Array.prototype.forEach.call(document.querySelectorAll(PANEL_SEL), function (p){
+        if (p._rrA11y) return;
+        p._rrA11y = true;
+        mo.observe(p, { attributes: true, attributeFilter: ['class'] });
+      });
+    }
+    new MutationObserver(function (){ watch(); sweep(); }).observe(document.body, { childList: true });
+    watch(); sweep();
+    document.addEventListener('keydown', function (e){
+      if (!current) return;
+      if (e.key === 'Tab'){
+        var f = focusables(current);
+        if (!f.length) return;
+        var first = f[0], last = f[f.length - 1], a = document.activeElement;
+        if (e.shiftKey && (a === first || !current.contains(a))) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
+      } else if (e.key === 'Escape' && current.classList.contains('rr-analyze-overlay')){
+        // the PDF/notes/profile panels close themselves on Esc already; the flow and
+        // diagnostics panels close through the Back button in their bar
+        var back = current.querySelector('.rr-pdf-bar .rr-wm-btn');
+        if (back) { e.preventDefault(); e.stopPropagation(); back.click(); }
+      }
+    }, true);
+  })();
+
   /* ---- shared overlay (form → working → done) ---- */
   function buildFlowOverlay(){
     if (flowOv) return flowOv;
@@ -1035,6 +1313,7 @@
     var run = el('div', 'rr-analyze-run');
     run.appendChild(el('div', 'rr-analyze-spinner'));
     var st = el('div', 'rr-analyze-status'); st.textContent = jobStatusText || 'Starting…';
+    st.setAttribute('role', 'status'); st.setAttribute('aria-live', 'polite');
     run.appendChild(st);
     if (extra){                                      // e.g. the first-launch "Continue"
       var ex = el('div', 'rr-analyze-actions rr-analyze-actions--center');
@@ -1042,7 +1321,21 @@
       go.addEventListener('click', function (){ go.disabled = true; extra.run(); });
       ex.appendChild(go); run.appendChild(ex);
     }
-    run.appendChild(el('div', 'rr-analyze-sub2', 'You can close this and keep browsing — I’ll let you know when it’s ready.'));
+    // elapsed + the assistant's last line: a spinner alone can't be told from a hang
+    var meta = el('div', 'rr-analyze-meta'); meta.hidden = true;
+    var metaTime = el('span', 'rr-analyze-elapsed', '');
+    var metaLine = el('span', 'rr-analyze-lastline', '');
+    meta.appendChild(metaTime); meta.appendChild(metaLine);
+    run.appendChild(meta);
+    if (runTick) { clearInterval(runTick); runTick = null; }
+    runTick = setInterval(function (){
+      if (!document.body.contains(meta)) { clearInterval(runTick); runTick = null; return; }
+      if (!job || !job.sentAt) { meta.hidden = true; return; }
+      meta.hidden = false;
+      metaTime.textContent = 'Running ' + fmtElapsed(Date.now() - job.sentAt);
+      metaLine.textContent = lastOutLine ? ('· ' + lastOutLine) : '';
+    }, 1000);
+    run.appendChild(el('div', 'rr-analyze-sub2', 'You can close this and keep browsing — I’ll let you know when it’s ready. Closing the window is fine too: the app keeps the run going and finishes writing.'));
     if (!noStop){
       // Stop → confirm row → job-stop 'user' (kills the assistant, rolls the library back)
       var stopWrap = el('div', 'rr-analyze-stop');
@@ -1065,6 +1358,7 @@
   // final card after a rollback: nothing was added; Close, or Try again (the same flow's form)
   function showFlowStopped(spec, text){
     jobStatusText = '';
+    if (spec && spec.onStopped) spec.onStopped();                 // a stopped queue stops for good
     text = text || 'Stopped — nothing was added to your library.';
     if (!(flowOv && flowOv.classList.contains('rr-show'))){
       toast(text, 'Try again', function (){ if (spec.again) spec.again(); });
@@ -1222,6 +1516,17 @@
     var b = aiCfgModal._body; b.innerHTML = '';
     b.appendChild(el('p', 'rr-analyze-help', 'Which model and how much reasoning effort each assistant uses when the app launches it — for the flow buttons and the Terminal ▾ launches alike. Saved in this browser.'));
     aiSelectorInto(b, { open: true });
+    // screen-reader mode: xterm mirrors the terminal into a live region so a reader
+    // can follow the assistant. Off by default (it announces every redraw).
+    var srWrap = el('label', 'rr-aicfg-sr');
+    var srBox = el('input'); srBox.type = 'checkbox'; srBox.checked = srMode();
+    srWrap.appendChild(srBox);
+    srWrap.appendChild(el('span', '', 'Screen-reader mode in the terminal — announce the assistant’s output'));
+    srBox.addEventListener('change', function (){
+      lsSet(LS_SR, srBox.checked ? '1' : '0');
+      if (term) { try { term.options.screenReaderMode = srBox.checked; } catch (e) {} }
+    });
+    b.appendChild(srWrap);
     aiCfgModal.hidden = false; document.body.classList.add('rr-modal-open');
   }
   function closeAiCfgModal(){
@@ -1294,42 +1599,210 @@
 
   /* ---- Analyze: /explain-paper <input> --approve → new report ---- */
   var analyzePrefill = '';                       // set by RR_openAnalyze (graph ghost nodes etc.)
+  var analyzeQueue = null;                       // { list, idx, ai, opts, done } while a stack runs
   function openAnalyze(prefill){
     analyzePrefill = clean1(prefill || '');
     openFlow('Analyze a paper', renderAnalyzeForm);
   }
+  // Upload a PDF from this machine into papers/ and analyze that path. Outside ML most
+  // papers are a file on disk behind a paywall — and this window has no file browser.
+  function uploadPdf(file){
+    return fetch('/api/paper-upload?name=' + encodeURIComponent(file.name), { method: 'POST', body: file })
+      .then(function (r){ return r.json().catch(function (){ return { ok: false, error: 'HTTP ' + r.status }; }); })
+      .then(function (j){ if (!j || !j.ok) throw new Error((j && j.error) || 'upload failed'); return j; });
+  }
+  function analyzeFlags(opts){
+    var f = '';
+    if (!opts) return f;
+    if (opts.depth) f += ' --depth ' + opts.depth;
+    if (opts.audience) f += ' --audience ' + opts.audience;
+    if (opts.focus) f += ' --focus "' + opts.focus.replace(/["\\]/g, '') + '"';
+    return f;
+  }
   function renderAnalyzeForm(card){
     heads(card, 'Analyze a paper', 'Add a paper to your library — I read it and write the report for you.');
     labelInto(card, 'Paper').setAttribute('for', 'rr-analyze-input');
+    var row = el('div', 'rr-analyze-row');
     var input = el('input', 'rr-analyze-input'); input.id = 'rr-analyze-input';   // id: label pairing + stable hook
     input.type = 'text'; input.autocomplete = 'off'; input.spellcheck = false;
-    input.placeholder = 'arXiv ID, URL, or path to a PDF   (e.g. 1706.03762)'; card.appendChild(input);
-    card.appendChild(el('div', 'rr-analyze-help', 'An arXiv id or URL, a direct PDF link, or a local PDF path. You can add flags, e.g. <code>2010.11929 --depth deep</code>.'));
+    input.placeholder = 'arXiv ID, URL, or path to a PDF   (e.g. 1706.03762)';
+    var pick = el('button', 'rr-wm-btn rr-analyze-pick', ICO_PDF + '<span>Choose PDF…</span>'); pick.type = 'button';
+    pick.title = 'Analyze a PDF from this computer';
+    var file = el('input'); file.type = 'file'; file.accept = 'application/pdf,.pdf'; file.multiple = true; file.hidden = true;
+    row.appendChild(input); row.appendChild(pick); row.appendChild(file);
+    card.appendChild(row);
+    card.appendChild(el('div', 'rr-analyze-help', 'An arXiv id or URL, a direct PDF link, or a PDF from this computer — <b>drop one anywhere on this panel</b>. You can add flags by hand too, e.g. <code>2010.11929 --depth deep</code>.'));
+
+    // the queue: everything added so far, analyzed one after another
+    var items = [];                                // { value, label }
+    var queueWrap = el('div', 'rr-queue'); queueWrap.hidden = true; card.appendChild(queueWrap);
+    var upMsg = el('div', 'rr-analyze-help rr-queue-msg'); upMsg.hidden = true; card.appendChild(upMsg);
+    function drawQueue(){
+      queueWrap.innerHTML = '';
+      queueWrap.hidden = !items.length;
+      if (!items.length) return;
+      var h = el('div', 'rr-queue-head'); h.textContent = items.length + ' paper' + (items.length === 1 ? '' : 's') + ' queued — they run one after another';
+      queueWrap.appendChild(h);
+      items.forEach(function (it, i){
+        var chip = el('div', 'rr-queue-item');
+        var t = el('span', 'rr-queue-ttl'); t.textContent = it.label; chip.appendChild(t);
+        var x = el('button', 'rr-queue-x', ICO_X); x.type = 'button'; x.title = 'Remove from the queue';
+        x.addEventListener('click', function (){ items.splice(i, 1); drawQueue(); refresh(); });
+        chip.appendChild(x); queueWrap.appendChild(chip);
+      });
+    }
+    function addItem(value, label){
+      value = clean1(value); if (!value) return;
+      if (items.some(function (x){ return x.value === value; })) return;
+      items.push({ value: value, label: label || value });
+      drawQueue(); refresh();
+    }
+    function takeInput(){ var v = input.value.trim(); if (v){ addItem(v, v); input.value = ''; } }
+
+    var busy = 0;
+    function uploadFiles(list){
+      var pdfs = Array.prototype.filter.call(list || [], function (f){ return /\.pdf$/i.test(f.name || ''); });
+      var skipped = (list ? list.length : 0) - pdfs.length;
+      if (!pdfs.length){
+        upMsg.hidden = false; upMsg.textContent = skipped ? 'Only PDF files can be analyzed from disk.' : '';
+        return;
+      }
+      pdfs.forEach(function (f){
+        busy++; refresh();
+        upMsg.hidden = false; upMsg.textContent = 'Copying ' + f.name + ' into your library…';
+        uploadPdf(f).then(function (j){
+          busy--; addItem(j.path, f.name);
+          upMsg.textContent = 'Added ' + j.path + (busy ? ' — still copying…' : '');
+          refresh();
+        }, function (e){
+          busy--; upMsg.textContent = 'Couldn’t add ' + f.name + ' — ' + e.message; refresh();
+        });
+      });
+    }
+    pick.addEventListener('click', function (){ file.click(); });
+    file.addEventListener('change', function (){ uploadFiles(file.files); file.value = ''; });
+    // drag & drop onto the whole panel
+    ['dragenter', 'dragover'].forEach(function (ev){
+      card.addEventListener(ev, function (e){ e.preventDefault(); e.stopPropagation(); card.classList.add('rr-drop'); });
+    });
+    ['dragleave', 'drop'].forEach(function (ev){
+      card.addEventListener(ev, function (e){ e.preventDefault(); e.stopPropagation(); if (ev === 'dragleave' && card.contains(e.relatedTarget)) return; card.classList.remove('rr-drop'); });
+    });
+    card.addEventListener('drop', function (e){ if (e.dataTransfer && e.dataTransfer.files) uploadFiles(e.dataTransfer.files); });
+
+    // per-run options — the reader's profile defaults apply when these are left alone
+    var opts = el('details', 'rr-opts');
+    var sum = el('summary', 'rr-opts-sum', 'Options — depth, audience, a focus'); opts.appendChild(sum);
+    var obody = el('div', 'rr-opts-body');
+    function sel(label, name, choices){
+      var w = el('label', 'rr-opt');
+      w.appendChild(el('span', 'rr-opt-l', label));
+      var s = el('select', 'rr-analyze-input rr-opt-s');
+      choices.forEach(function (c){ s.appendChild(new Option(c[1], c[0])); });
+      w.appendChild(s); obody.appendChild(w);
+      return s;
+    }
+    var depth = sel('Depth', 'depth', [['', 'From your profile'], ['skim', 'Skim'], ['standard', 'Standard'], ['deep', 'Deep']]);
+    var audience = sel('Audience', 'audience', [['', 'From your profile'], ['peer', 'Peer'], ['newcomer', 'Newcomer']]);
+    var focusW = el('label', 'rr-opt rr-opt-wide');
+    focusW.appendChild(el('span', 'rr-opt-l', 'Focus (optional)'));
+    var focus = el('input', 'rr-analyze-input'); focus.type = 'text'; focus.placeholder = 'e.g. the stability proof';
+    focusW.appendChild(focus); obody.appendChild(focusW);
+    opts.appendChild(obody); card.appendChild(opts);
+
     var getAi = aiSelectorInto(card);
-    var actions = el('div', 'rr-analyze-actions'); var go = el('button', 'rr-wm-btn rr-wm-primary rr-analyze-go', ICO_DOC + '<span>Analyze</span>'); go.type = 'button'; go.disabled = true; actions.appendChild(go); card.appendChild(actions);
+    var actions = el('div', 'rr-analyze-actions');
+    var add = el('button', 'rr-wm-btn', ICO_DOC + '<span>Add another</span>'); add.type = 'button';
+    add.title = 'Queue this one and type the next';
+    var go = el('button', 'rr-wm-btn rr-wm-primary rr-analyze-go', ICO_DOC + '<span>Analyze</span>'); go.type = 'button'; go.disabled = true;
+    actions.appendChild(add); actions.appendChild(go); card.appendChild(actions);
     card.appendChild(noteEl('Runs <code>/explain-paper … --approve</code> in a hidden assistant session. Generating a report needs internet and can take a few minutes; if the assistant asks for permission, use <b>Show terminal</b>.'));
-    function refresh(){ go.disabled = !input.value.trim(); }
+
+    function count(){ return items.length + (input.value.trim() ? 1 : 0); }
+    function refresh(){
+      var n = count();
+      go.disabled = !n || busy > 0;
+      add.disabled = !input.value.trim();
+      go.querySelector('span').textContent = n > 1 ? ('Analyze ' + n + ' papers') : 'Analyze';
+    }
     input.addEventListener('input', refresh);
     input.addEventListener('keydown', function (e){ if (e.key === 'Enter' && input.value.trim()){ e.preventDefault(); go.click(); } });
-    go.addEventListener('click', function (){ if (input.value.trim()) startAnalyze(input.value, getAi()); });
-    if (analyzePrefill){ input.value = analyzePrefill; analyzePrefill = ''; refresh(); }   // e.g. a ghost node's id
+    add.addEventListener('click', function (){ takeInput(); input.focus(); });
+    go.addEventListener('click', function (){
+      takeInput();
+      if (!items.length) return;
+      var o = { depth: depth.value, audience: audience.value, focus: clean1(focus.value) };
+      var list = items.slice();
+      items = []; drawQueue(); refresh();
+      if (list.length === 1) startAnalyze(list[0].value, getAi(), o);
+      else startAnalyzeQueue(list, getAi(), o);
+    });
+    if (analyzePrefill){ input.value = analyzePrefill; analyzePrefill = ''; }   // e.g. a ghost node's id
+    refresh();
     setTimeout(function (){ input.focus(); }, 40);
   }
-  function startAnalyze(input, ai){
+  // one paper at a time: the server registers a single run (its rollback is scoped to
+  // one artifact), so the queue starts the next only once this one has landed
+  function startAnalyzeQueue(list, ai, opts){
+    analyzeQueue = { list: list, idx: 0, ai: ai, opts: opts, done: [] };
+    queueNext();
+  }
+  function queueNext(){
+    var q = analyzeQueue;
+    if (!q) return;
+    if (q.idx >= q.list.length){ analyzeQueue = null; showQueueDone(q); return; }
+    startAnalyze(q.list[q.idx].value, q.ai, q.opts, q);
+  }
+  function showQueueDone(q){
+    var n = q.done.length;
+    if (!(flowOv && flowOv.classList.contains('rr-show'))){
+      toast(n === 1 ? ('Report ready — ' + q.done[0]) : (n + ' reports ready'), 'Open library', function (){ location.href = '/library.html'; });
+      return;
+    }
+    var card = flowOv._card; card.innerHTML = '';
+    flowOv._title.textContent = 'Analyze papers'; flowOv._showTerm.hidden = false;
+    var done = el('div', 'rr-analyze-run');
+    done.appendChild(el('div', 'rr-analyze-check', '✓'));
+    var st = el('div', 'rr-analyze-status'); st.textContent = 'Added ' + n + ' paper' + (n === 1 ? '' : 's') + ' to your library.'; done.appendChild(st);
+    var list = el('div', 'rr-queue');
+    q.done.forEach(function (id){
+      var a = el('a', 'rr-queue-item rr-queue-link'); a.href = '/papers/' + encodeURIComponent(id) + '/';
+      a.appendChild(el('span', 'rr-queue-ttl', esc(id)));
+      list.appendChild(a);
+    });
+    done.appendChild(list);
+    var actions = el('div', 'rr-analyze-actions rr-analyze-actions--center');
+    var lib = el('button', 'rr-wm-btn rr-wm-primary', ICO_DOC + '<span>Open library</span>'); lib.type = 'button';
+    lib.addEventListener('click', function (){ location.href = '/library.html'; });
+    var again = el('button', 'rr-wm-btn', ICO_DOC + '<span>Analyze more</span>'); again.type = 'button';
+    again.addEventListener('click', function (){ openAnalyze(); });
+    actions.appendChild(lib); actions.appendChild(again);
+    done.appendChild(actions); card.appendChild(done);
+    flowOv._status = null;
+  }
+  function startAnalyze(input, ai, opts, q){
     input = clean1(input); if (!input) return;
     // an arXiv id already in the library? then /explain-paper REWRITES that report:
     // the server keeps the old digest for a Stop, and "done" is a report-changed for it
     var mid = input.match(/(\d{4}\.\d{4,5})(?:v\d+)?/);
     reportsList().then(function (list){
       var known = (mid && list.some(function (p){ return p.id === mid[1]; })) ? mid[1] : null;
-      startAnalyzeJob(input, ai, known);
-    }, function (){ startAnalyzeJob(input, ai, null); });
+      startAnalyzeJob(input, ai, known, opts, q);
+    }, function (){ startAnalyzeJob(input, ai, null, opts, q); });
   }
-  function startAnalyzeJob(input, ai, known){
+  function startAnalyzeJob(input, ai, known, opts, q){
+    // flags the reader typed by hand win — never pass --depth twice
+    var extra = analyzeFlags({
+      depth: /--depth\b/.test(input) ? '' : (opts && opts.depth),
+      audience: /--audience\b/.test(input) ? '' : (opts && opts.audience),
+      focus: /--focus\b/.test(input) ? '' : (opts && opts.focus),
+    });
+    var pos = q ? ('Paper ' + (q.idx + 1) + ' of ' + q.list.length + ': ') : '';
     runJob({
-      kind: 'analyze', id: known || undefined, ai: ai, title: 'Analyze a paper', cmd: '/explain-paper ' + input + ' --approve',
-      working: (known ? 'Re-analyzing “' : 'Analyzing “') + input + '” — this can take a few minutes.',
-      building: 'Writing the report page …',
+      kind: 'analyze', id: known || undefined, ai: ai, title: q ? 'Analyze papers' : 'Analyze a paper',
+      cmd: '/explain-paper ' + input + extra + ' --approve',
+      working: pos + (known ? 'Re-analyzing “' : 'Analyzing “') + input + '” — this can take a few minutes.',
+      building: pos + 'Writing the report page …',
       watch: function (m){
         if (m.type === 'report-added') return m.id;
         if (known && m.type === 'report-changed' && m.id === known) return known;
@@ -1338,6 +1811,9 @@
       verify: function (id){ return headOk('/papers/' + encodeURIComponent(id) + '/index.html'); },
       openUrl: function (id){ return '/papers/' + encodeURIComponent(id) + '/'; }, openLabel: 'Open report',
       doneText: function (id){ return 'Added ' + id + ' to your library.'; }, doneToast: function (id){ return 'Report ready — ' + id; },
+      // a queue keeps going instead of showing the single-paper done card
+      onDone: q ? function (id){ q.done.push(id); q.idx++; setTimeout(queueNext, 600); return true; } : null,
+      onStopped: q ? function (){ analyzeQueue = null; } : null,
       again: function (){ openAnalyze(); }, againLabel: 'Analyze another',   // wrapped: a raw handler would pass the click event as prefill
     });
   }

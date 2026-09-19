@@ -5,6 +5,45 @@ names the current release; the app's update checker (avatar menu → **Updates**
 looks for a newer version — new commits on a clone's git remote, or a newer
 published release for a ZIP copy — and installs it in one click.
 
+## 1.3.0 — 2026-09-19
+
+- **Analyze a PDF from your computer.** *Choose PDF…* in the Analyze panel, or drop
+  one (or several) anywhere on it: the file is copied into `papers/` and analyzed
+  like any other paper. Most fields are not on arXiv, and the app window has no file
+  browser of its own — this is how a paywalled or scanned paper gets in.
+- **A queue, not one paper at a time.** *Add another* stacks papers up; the button
+  then reads *Analyze N papers* and works through them in order, saying which one it
+  is on, and finishes with a list of everything it added.
+- **Per-run options** on Analyze: depth, audience and a focus for this run only,
+  without typing flags. Your profile's defaults still apply when they are left alone.
+- **Reading state is saved to disk** (`user/reading-state.json`) as well as in the
+  browser. Status, stars, collections and dismissed graph nodes now survive a new
+  browser, a different port (the app falls back when 4317 is busy — the library used
+  to come back unread), and a restore from backup.
+- **A run outlives its window.** Closing the app while a report is being written no
+  longer kills it: the server stays up until the run lands, writes the report, and
+  then quits. The run card also shows elapsed time and the assistant's last line, so
+  a long job looks supervised rather than hung.
+- **Remove paper** on a report page — it lists exactly what will be deleted and
+  warns about comparisons built on that paper, then rebuilds.
+- **Diagnostics** (avatar menu): versions, which assistants were found on PATH, how
+  this copy was installed, the library's size and the tail of the server log, with
+  one-click **Copy**.
+- **Backups before updates, and on a schedule.** Every update now writes a PDF-less
+  snapshot of the library first; *Back up* gained a daily/weekly/monthly automatic
+  backup (only the five newest are kept).
+- **Updates follow published releases**, not the branch head: a download now updates
+  to the newest **release** (preferring the packaged ZIP for its platform), so it can
+  never land mid-work code, and a clone names the newest version tag.
+- **Linux launcher** (`ReadingRoom.sh`, with a menu entry on first run) and
+  `scripts/package_release.sh`, which builds a release ZIP with the app's
+  dependencies already installed — no `npm install` or native build on first launch.
+- **Sort** the catalogue and the Library (year, recently updated, title, priority,
+  reading status); the Library filter now also searches ids, years and summaries.
+- **Accessibility**: the full-screen panels are proper dialogs (focus moves in, Tab
+  stays inside, Esc closes, focus returns), run status is announced, graph nodes are
+  keyboard-reachable, and the terminal has an optional screen-reader mode.
+
 ## 1.2.2 — 2026-09-19
 
 - **Setup with Codex or Gemini.** Setup's auto-run now uses the syntax of the

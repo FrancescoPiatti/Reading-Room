@@ -630,6 +630,11 @@ mjx-container[display="true"] { margin: 0.6em 0 1.1em; }
 }
 .lib-group select:focus { outline: none; border-color: var(--accent); }
 
+/* graph nodes are keyboard-reachable (tabindex on each <g>) — make the focus visible */
+.node:focus { outline: none; }
+.node:focus circle { stroke: var(--accent); stroke-width: 3px; }
+.node:focus-visible circle { stroke: var(--accent); stroke-width: 3px; }
+
 .lib-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0 6px; }
 .lib-actions .spacer { flex: 1; }
 .lib-check { font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft);
@@ -950,6 +955,15 @@ body.rr-modal-open { overflow: hidden; }
 
   <div class="controls">
     <input class="search" id="q" type="search" placeholder="Search titles, authors, ideas…" aria-label="Search papers" autocomplete="off">
+    <label class="lib-group">Sort
+      <select id="sort">
+        <option value="year">Year (newest)</option>
+        <option value="updated">Recently updated</option>
+        <option value="title">Title A–Z</option>
+        <option value="prio">Priority</option>
+        <option value="status">Reading status</option>
+      </select>
+    </label>
     <span class="count" id="count"></span>
   </div>
   <div class="statusbar" id="statusbar" aria-label="Filter by reading status">
@@ -976,7 +990,7 @@ body.rr-modal-open { overflow: hidden; }
 
 <script src="assets/vendor/fuse.min.js"></script>
 <script>
-const CATALOGUE = [{"id": "1706.03762", "title": "Attention Is All You Need", "authors": ["Ashish Vaswani", "Noam Shazeer", "Niki Parmar", "Jakob Uszkoreit", "Llion Jones", "Aidan N. Gomez", "Łukasz Kaiser", "Illia Polosukhin"], "year": 2017, "venue": "NeurIPS 2017", "tldr": "Replaces recurrence and convolution entirely with (multi-head) self-attention, yielding a sequence-transduction architecture — the Transformer — that is more parallelizable, trains in a fraction of the time, and sets new single-model state of the art on WMT 2014 translation (28.4 BLEU EN–DE, 41.8 BLEU EN–FR).", "tags": ["deep-learning", "natural-language-processing", "efficiency"], "contributions": ["The Transformer: an encoder–decoder architecture built solely from attention and position-wise feed-forward layers — no recurrence, no convolution (Figure 1)", "Scaled dot-product attention and multi-head attention, with the 1/√d_k scaling justified by the growth of dot-product variance (Section 3.2, footnote 4)", "State-of-the-art WMT 2014 results at a small fraction of prior training cost, plus generalization to English constituency parsing (Tables 2 and 4)"], "status": "to-read", "priority": 0, "text": "Sequence transduction in 2017 was dominated by recurrent encoder–decoders: the encoder walks the input one position at a time, so computation cannot be parallelized within a training example, and long-range dependencies must survive a chain of \\(O(n)\\) steps (Section 1). Attention had already proven useful for connecting encoder and decoder across arbitrary distances, but only as an add-on to a recurrent core. This paper removes the core. The Transformer keeps the encoder–decoder shape (Section 3, Figure 1) but builds both halves from just two ingredients: multi-head self-attention , which lets every position attend to every other position in one shot, and a position-wise feed-forward network . Order information, previously implicit in recurrence, is injected explicitly through sinusoidal positional encodings added to the embeddings (Section 3.5). The payoff is measured on WMT 2014 machine translation (Section 6.1, Table 2): the big model reaches 28.4 BLEU on English–German — more than 2 BLEU above the best previous results including ensembles — and 41.8 BLEU on English–French, a new single-model state of the art, after only 3.5 days on 8 P100 GPUs. The base model already beats all previously published single models at a training cost of \\(3.3\\times 10^{18}\\) FLOPs, an order of magnitude below competitors. A 4-layer variant also generalizes to English constituency parsing with minimal tuning (Section 6.3, Table 4). The atom of the architecture is scaled dot-product attention (Section 3.2.1, Figure 2 left). Queries and keys of dimension \\(d_k\\) and values of dimension \\(d_v\\) are packed into matrices and combined as \\[ \\mathrm{Attention}(Q, K, V) = \\mathrm{softmax}\\!\\left(\\frac{QK^{T}}{\\sqrt{d_k}}\\right)V . \\] The \\(1/\\sqrt{d_k}\\) factor is the paper's one delicate choice: if the components of \\(q\\) and \\(k\\) are independent with mean 0 and variance 1, the dot product \\(q \\cdot k = \\sum_{i=1}^{d_k} q_i k_i\\) has variance \\(d_k\\) (footnote 4), so unscaled logits push the softmax into regions of vanishing gradient as \\(d_k\\) grows — which is exactly when additive attention otherwise wins (Section 3.2.1). Scaling restores the fast, matrix-multiply-friendly dot product. Multi-head attention (Section 3.2.2) projects \\(Q, K, V\\) down \\(h\\) times with learned maps \\(W_i^{Q}, W_i^{K} \\in \\mathbb{R}^{d_{\\text{model}} \\times d_k}\\), \\(W_i^{V} \\in \\mathbb{R}^{d_{\\text{model}} \\times d_v}\\), attends in each subspace in parallel, and re-projects the concatenation: \\[ \\m"}, {"id": "hornik1989", "title": "Multilayer Feedforward Networks are Universal Approximators", "authors": ["Kurt Hornik", "Maxwell Stinchcombe", "Halbert White"], "year": 1989, "venue": "Neural Networks 2(5)", "tldr": "Single-hidden-layer feedforward networks with an arbitrary squashing activation can approximate any continuous function uniformly on compacta and any Borel measurable function in probability — so failures in practice must come from learning, too few hidden units, or noise, never from the architecture class itself.", "tags": ["deep-learning", "theory"], "contributions": ["Proves single-hidden-layer Σ networks with any squashing function are uniformly dense on compacta in C(R^r) and dense in probability in the Borel measurable functions (Theorem 2.4) — universality with no continuity assumption on the activation.", "Establishes the same for ΣΠ networks with any continuous nonconstant activation via the Stone–Weierstrass theorem (Theorems 2.1–2.3).", "Shows exact interpolation of any n distinct points by a single hidden layer with n units (Theorem 2.5), and extends universality to multi-output and deeper (l ≥ 2 layer) networks (Corollaries 2.6–2.7).", "Frames what universality does and does not buy: nothing about how many hidden units are needed or whether weights can be learned — explicitly deferred to the sieve-estimation and metric-entropy literature."], "status": "to-read", "priority": 0, "text": "By 1989, feedforward networks were succeeding across applications, but it was an open question whether this reflected a fundamental approximation capability or lucky problem selection. Minsky &amp; Papert had killed the two-layer perceptron two decades earlier; the standing worry was that multilayer networks might also be limited to some special function class (§1). Kolmogorov's superposition theorem was often cited in the networks' defence, but it needs a different , unknown inner transformation for each target function, while practitioners use one fixed squashing nonlinearity (logistic, tanh) and simply add hidden units (§1). This paper settles the question. Using the Stone–Weierstrass theorem plus a constructive reduction through trigonometric polynomials and the Gallant–White \"cosine squasher\", it proves that a single hidden layer of squashing units — the activation can be any non-decreasing function from 0 to 1, continuous or not — makes the network class dense in the continuous functions (uniformly on every compact set) and dense in the Borel measurable functions in a probability metric, for every input dimension and every input distribution (Theorems 2.3–2.4, §2). The practical reading the authors themselves give (§3): when a network fails, the blame lies with inadequate learning, insufficient hidden units, or a stochastic input–target relation — never with the expressiveness of the architecture family. What the paper deliberately does not address is how many units a given accuracy costs, or how that count scales with input dimension — both flagged as open problems (§3). The objects are function classes built on affine maps. With \\(A(x) = w \\cdot x + b\\) ranging over the affine functions \\(\\mathbf{A}^r\\) (Def. 2.1), the single-hidden-layer class for an activation \\(G\\) is \\[ \\Sigma^r(G) = \\Big\\{ f(x) = \\sum_{j=1}^{q} \\beta_j\\, G(A_j(x)) : \\beta_j \\in \\mathbb{R},\\; A_j \\in \\mathbf{A}^r,\\; q \\in \\mathbb{N} \\Big\\}, \\] and \\(\\Sigma\\Pi^r(G)\\) additionally allows products \\(\\prod_{k} G(A_{jk}(x))\\) inside each term (Defs. 2.2, 2.4). A squashing function \\(\\Psi : \\mathbb{R} \\to [0,1]\\) is any non-decreasing function with \\(\\lim_{\\lambda\\to\\infty}\\Psi(\\lambda)=1\\), \\(\\lim_{\\lambda\\to-\\infty}\\Psi(\\lambda)=0\\) — thresholds, ramps and the cosine squasher all qualify (Def. 2.3). Two notions of closeness (Defs. 2.6–2.9): uniform density on compacta in \\(C^r\\), and, for measurable targets \\(M^r\\), the metric \\(\\rho_\\mu(f,g) = \\inf\\{\\varepsilon &gt; 0 : \\mu\\{x : |"}];
+const CATALOGUE = [{"id": "1706.03762", "title": "Attention Is All You Need", "authors": ["Ashish Vaswani", "Noam Shazeer", "Niki Parmar", "Jakob Uszkoreit", "Llion Jones", "Aidan N. Gomez", "Łukasz Kaiser", "Illia Polosukhin"], "year": 2017, "venue": "NeurIPS 2017", "tldr": "Replaces recurrence and convolution entirely with (multi-head) self-attention, yielding a sequence-transduction architecture — the Transformer — that is more parallelizable, trains in a fraction of the time, and sets new single-model state of the art on WMT 2014 translation (28.4 BLEU EN–DE, 41.8 BLEU EN–FR).", "tags": ["deep-learning", "natural-language-processing", "efficiency"], "contributions": ["The Transformer: an encoder–decoder architecture built solely from attention and position-wise feed-forward layers — no recurrence, no convolution (Figure 1)", "Scaled dot-product attention and multi-head attention, with the 1/√d_k scaling justified by the growth of dot-product variance (Section 3.2, footnote 4)", "State-of-the-art WMT 2014 results at a small fraction of prior training cost, plus generalization to English constituency parsing (Tables 2 and 4)"], "status": "to-read", "priority": 0, "text": "Sequence transduction in 2017 was dominated by recurrent encoder–decoders: the encoder walks the input one position at a time, so computation cannot be parallelized within a training example, and long-range dependencies must survive a chain of \\(O(n)\\) steps (Section 1). Attention had already proven useful for connecting encoder and decoder across arbitrary distances, but only as an add-on to a recurrent core. This paper removes the core. The Transformer keeps the encoder–decoder shape (Section 3, Figure 1) but builds both halves from just two ingredients: multi-head self-attention , which lets every position attend to every other position in one shot, and a position-wise feed-forward network . Order information, previously implicit in recurrence, is injected explicitly through sinusoidal positional encodings added to the embeddings (Section 3.5). The payoff is measured on WMT 2014 machine translation (Section 6.1, Table 2): the big model reaches 28.4 BLEU on English–German — more than 2 BLEU above the best previous results including ensembles — and 41.8 BLEU on English–French, a new single-model state of the art, after only 3.5 days on 8 P100 GPUs. The base model already beats all previously published single models at a training cost of \\(3.3\\times 10^{18}\\) FLOPs, an order of magnitude below competitors. A 4-layer variant also generalizes to English constituency parsing with minimal tuning (Section 6.3, Table 4). The atom of the architecture is scaled dot-product attention (Section 3.2.1, Figure 2 left). Queries and keys of dimension \\(d_k\\) and values of dimension \\(d_v\\) are packed into matrices and combined as \\[ \\mathrm{Attention}(Q, K, V) = \\mathrm{softmax}\\!\\left(\\frac{QK^{T}}{\\sqrt{d_k}}\\right)V . \\] The \\(1/\\sqrt{d_k}\\) factor is the paper's one delicate choice: if the components of \\(q\\) and \\(k\\) are independent with mean 0 and variance 1, the dot product \\(q \\cdot k = \\sum_{i=1}^{d_k} q_i k_i\\) has variance \\(d_k\\) (footnote 4), so unscaled logits push the softmax into regions of vanishing gradient as \\(d_k\\) grows — which is exactly when additive attention otherwise wins (Section 3.2.1). Scaling restores the fast, matrix-multiply-friendly dot product. Multi-head attention (Section 3.2.2) projects \\(Q, K, V\\) down \\(h\\) times with learned maps \\(W_i^{Q}, W_i^{K} \\in \\mathbb{R}^{d_{\\text{model}} \\times d_k}\\), \\(W_i^{V} \\in \\mathbb{R}^{d_{\\text{model}} \\times d_v}\\), attends in each subspace in parallel, and re-projects the concatenation: \\[ \\m", "updated": 1789235397}, {"id": "hornik1989", "title": "Multilayer Feedforward Networks are Universal Approximators", "authors": ["Kurt Hornik", "Maxwell Stinchcombe", "Halbert White"], "year": 1989, "venue": "Neural Networks 2(5)", "tldr": "Single-hidden-layer feedforward networks with an arbitrary squashing activation can approximate any continuous function uniformly on compacta and any Borel measurable function in probability — so failures in practice must come from learning, too few hidden units, or noise, never from the architecture class itself.", "tags": ["deep-learning", "theory"], "contributions": ["Proves single-hidden-layer Σ networks with any squashing function are uniformly dense on compacta in C(R^r) and dense in probability in the Borel measurable functions (Theorem 2.4) — universality with no continuity assumption on the activation.", "Establishes the same for ΣΠ networks with any continuous nonconstant activation via the Stone–Weierstrass theorem (Theorems 2.1–2.3).", "Shows exact interpolation of any n distinct points by a single hidden layer with n units (Theorem 2.5), and extends universality to multi-output and deeper (l ≥ 2 layer) networks (Corollaries 2.6–2.7).", "Frames what universality does and does not buy: nothing about how many hidden units are needed or whether weights can be learned — explicitly deferred to the sieve-estimation and metric-entropy literature."], "status": "to-read", "priority": 0, "text": "By 1989, feedforward networks were succeeding across applications, but it was an open question whether this reflected a fundamental approximation capability or lucky problem selection. Minsky &amp; Papert had killed the two-layer perceptron two decades earlier; the standing worry was that multilayer networks might also be limited to some special function class (§1). Kolmogorov's superposition theorem was often cited in the networks' defence, but it needs a different , unknown inner transformation for each target function, while practitioners use one fixed squashing nonlinearity (logistic, tanh) and simply add hidden units (§1). This paper settles the question. Using the Stone–Weierstrass theorem plus a constructive reduction through trigonometric polynomials and the Gallant–White \"cosine squasher\", it proves that a single hidden layer of squashing units — the activation can be any non-decreasing function from 0 to 1, continuous or not — makes the network class dense in the continuous functions (uniformly on every compact set) and dense in the Borel measurable functions in a probability metric, for every input dimension and every input distribution (Theorems 2.3–2.4, §2). The practical reading the authors themselves give (§3): when a network fails, the blame lies with inadequate learning, insufficient hidden units, or a stochastic input–target relation — never with the expressiveness of the architecture family. What the paper deliberately does not address is how many units a given accuracy costs, or how that count scales with input dimension — both flagged as open problems (§3). The objects are function classes built on affine maps. With \\(A(x) = w \\cdot x + b\\) ranging over the affine functions \\(\\mathbf{A}^r\\) (Def. 2.1), the single-hidden-layer class for an activation \\(G\\) is \\[ \\Sigma^r(G) = \\Big\\{ f(x) = \\sum_{j=1}^{q} \\beta_j\\, G(A_j(x)) : \\beta_j \\in \\mathbb{R},\\; A_j \\in \\mathbf{A}^r,\\; q \\in \\mathbb{N} \\Big\\}, \\] and \\(\\Sigma\\Pi^r(G)\\) additionally allows products \\(\\prod_{k} G(A_{jk}(x))\\) inside each term (Defs. 2.2, 2.4). A squashing function \\(\\Psi : \\mathbb{R} \\to [0,1]\\) is any non-decreasing function with \\(\\lim_{\\lambda\\to\\infty}\\Psi(\\lambda)=1\\), \\(\\lim_{\\lambda\\to-\\infty}\\Psi(\\lambda)=0\\) — thresholds, ramps and the cosine squasher all qualify (Def. 2.3). Two notions of closeness (Defs. 2.6–2.9): uniform density on compacta in \\(C^r\\), and, for measurable targets \\(M^r\\), the metric \\(\\rho_\\mu(f,g) = \\inf\\{\\varepsilon &gt; 0 : \\mu\\{x : |", "updated": 1789235397}];
 
 const cardsEl = document.getElementById('cards');
 const emptyEl = document.getElementById('empty');
@@ -996,6 +1010,23 @@ function prioOf(p){ const o = lsGet('rr-prio-'+p.id); if (o !== null) return par
 
 let activeTag = null;
 let activeStatus = '';
+// sort order — this browser's preference, remembered like the theme
+const sortEl = document.getElementById('sort');
+const STATUS_ORDER = {'reading': 0, 'to-read': 1, 'read': 2};
+function sortKey(){ return (sortEl && sortEl.value) || 'year'; }
+function sortList(list, relevance){
+  const k = sortKey();
+  // a search returns Fuse's relevance order; only override it on an explicit sort
+  if (relevance && k === 'year') return list;
+  const by = {
+    year:    (a,b) => (b.year||0) - (a.year||0) || a.title.localeCompare(b.title),
+    updated: (a,b) => (b.updated||0) - (a.updated||0) || a.title.localeCompare(b.title),
+    title:   (a,b) => a.title.localeCompare(b.title),
+    prio:    (a,b) => prioOf(b) - prioOf(a) || (b.year||0) - (a.year||0),
+    status:  (a,b) => (STATUS_ORDER[statusOf(a)] - STATUS_ORDER[statusOf(b)]) || (b.year||0) - (a.year||0),
+  }[k];
+  return by ? list.slice().sort(by) : list;
+}
 const PAGE = 8;     // papers shown before the "Show more" pager
 const STEP = 10;    // how many more each click reveals
 let shown = PAGE;
@@ -1048,7 +1079,7 @@ function card(p){
 
 function render(){
   const q = qEl.value.trim();
-  let list = q ? searchList(q) : CATALOGUE.slice();
+  let list = sortList(q ? searchList(q) : CATALOGUE.slice(), !!q);
   if (activeTag) list = list.filter(p => (p.tags||[]).includes(activeTag));
   if (activeStatus) list = list.filter(p => statusOf(p) === activeStatus);
   const slice = list.slice(0, shown);
@@ -1108,7 +1139,17 @@ function buildFilters(){
   });
 }
 
+// the sort choice rides along in this browser (a view preference, like the theme)
+function restoreSort(){
+  if (!sortEl) return;
+  try { const s = localStorage.getItem('rr-sort'); if (s && [].some.call(sortEl.options, o => o.value === s)) sortEl.value = s; } catch(e){}
+}
+restoreSort();
 qEl.addEventListener('input', function(){ shown = PAGE; render(); });
+if (sortEl) sortEl.addEventListener('change', function(){
+  try { localStorage.setItem('rr-sort', sortEl.value); } catch(e){}
+  shown = PAGE; render();
+});
 moreBtn.addEventListener('click', function(){ shown += STEP; render(); });
 buildFilters();
 render();
@@ -1173,6 +1214,8 @@ render();
 .rr-bk-sub { margin-left: auto; padding-left: 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 58%; }
 .rr-bk-sub:empty { display: none; }
 .rr-bk-custom { margin-top: 8px; font-family: var(--mono); font-size: 13px; }
+.rr-bk-auto { display: flex; align-items: center; gap: 10px; padding: 7px 10px; font-size: 13.5px; }
+.rr-bk-select { width: auto; min-width: 140px; padding: 6px 10px; font-size: 13px; font-family: var(--mono); }
 .rr-bk-custom[hidden] { display: none; }
 .rr-bk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .rr-bk-row .rr-q-note { margin: 0; flex: 1 1 100%; line-height: 1.5; word-break: break-word; }
@@ -1263,6 +1306,20 @@ render();
           <button type="button" class="rr-btn rr-btn-ghost" id="rr-backup-zip-reveal" hidden>Show in folder</button>
           <p class="rr-q-note" id="rr-backup-zip-msg" hidden></p>
         </div>
+        <p class="rr-bk-label">Automatic backups</p>
+        <div class="rr-bk-row">
+          <label class="rr-q-choice rr-bk-auto">
+            <span>Back up on its own</span>
+            <select class="rr-q-input rr-bk-select" id="rr-backup-auto">
+              <option value="0">Never</option>
+              <option value="1">Every day</option>
+              <option value="7">Every week</option>
+              <option value="30">Every month</option>
+            </select>
+          </label>
+          <p class="rr-q-note" id="rr-backup-auto-msg" hidden></p>
+        </div>
+        <p class="rr-q-hint">Automatic backups skip the PDFs (they can be downloaded again), land in the app’s backups folder, and only the five newest are kept. One is also written right before every update.</p>
       </section>
       <section class="rr-bk-sec" id="rr-backup-restore" hidden>
         <h3 class="rr-bk-h">Restore from zip</h3>
@@ -1281,7 +1338,8 @@ render();
       </section>
       <section class="rr-bk-sec">
         <h3 class="rr-bk-h">Browser reading state only (JSON)</h3>
-        <p class="rr-q-hint">Your <b>reading status</b>, <b>priority stars</b>, <b>custom tags / collections</b>, dismissed graph nodes, and theme are stored in this browser only. Export them to a small JSON file to move them to another browser or device, or as a backup.</p>
+        <p class="rr-q-hint">Your <b>reading status</b>, <b>priority stars</b>, <b>custom tags / collections</b>, dismissed graph nodes, and theme live in this browser. Export them to a small JSON file to move them to another browser or device, or as a backup.</p>
+        <p class="rr-q-hint" id="rr-backup-state-hint" hidden>In the app they are also saved to <code>user/reading-state.json</code> as you go, so they survive a new browser, a different port, and a restore — this export is for moving them somewhere the app isn’t.</p>
         <p class="rr-q-hint" id="rr-backup-static-hint">Your analysed papers, comparisons and discussions are files on disk. The full zip backup — and restore — lives in the Reading Room app (avatar menu → Back up); from an assistant, <code>/backup export</code> writes the same zip.</p>
         <div class="rr-bk-row">
           <button type="button" class="rr-btn" id="rr-backup-export">Export JSON</button>
@@ -1379,6 +1437,10 @@ render();
     else if (which === 'updates') {                 // app only (item added in initApp)
       if (typeof window.RR_openUpdates === 'function') window.RR_openUpdates(true);
       else flash('Checking for updates needs the app — open ReadingRoom.app (or ReadingRoom.bat).');
+    }
+    else if (which === 'diagnostics') {             // app only (item added in initApp)
+      if (typeof window.RR_openDiagnostics === 'function') window.RR_openDiagnostics();
+      else flash('Diagnostics need the app — open ReadingRoom.app (or ReadingRoom.bat).');
     }
     else openSetup();
   });
@@ -1518,6 +1580,8 @@ render();
   var bkZipNameEl   = document.getElementById('rr-backup-zip-name');
   var bkImportBtn   = document.getElementById('rr-backup-zip-import');
   var bkRestoreMsgEl= document.getElementById('rr-backup-restore-msg');
+  var bkAutoEl      = document.getElementById('rr-backup-auto');
+  var bkAutoMsgEl   = document.getElementById('rr-backup-auto-msg');
   var bkZipFileEl   = document.getElementById('rr-backup-zipfile');
   function isStateKey(k){ return /^rr-(status|prio|tags)-/.test(k) || k === 'rr-dismissed' || k === 'rr-theme'; }
   function stateKeys(){
@@ -1554,12 +1618,32 @@ render();
     if (wm) {
       noteMsg(bkZipMsgEl, ''); noteMsg(bkRestoreMsgEl, '');
       bkRevealBtn.hidden = true; lastZip = null; bkExportBtn.disabled = false;
-      resetPick(); loadBackupInfo();
+      resetPick(); loadBackupInfo(); loadBackupPrefs();
     }
     openModal(backupModal);
   }
 
   /* ---- full zip (app only) ---- */
+  function loadBackupPrefs(){
+    if (!bkAutoEl) return;
+    noteMsg(bkAutoMsgEl, '');
+    fetch('/api/backup/prefs').then(asJson).then(function (j){
+      if (!j || !j.ok) return;
+      bkAutoEl.value = String(j.autoBackupDays || 0);
+      if (j.lastBackupAgeDays != null) noteMsg(bkAutoMsgEl, j.lastBackupAgeDays === 0 ? 'Last backup: today' : ('Last backup: ' + j.lastBackupAgeDays + ' day' + (j.lastBackupAgeDays === 1 ? '' : 's') + ' ago'));
+    }).catch(function (){});
+  }
+  if (bkAutoEl) bkAutoEl.addEventListener('change', function (){
+    var v = parseInt(bkAutoEl.value, 10) || 0;
+    bkAutoEl.disabled = true;
+    fetch('/api/backup/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoBackupDays: v }) })
+      .then(asJson).then(function (j){
+        bkAutoEl.disabled = false;
+        if (!j || !j.ok) throw new Error((j && j.error) || 'could not save');
+        noteMsg(bkAutoMsgEl, v ? ('Backing up every ' + (v === 1 ? 'day' : v === 7 ? 'week' : 'month') + '.') : 'Automatic backups are off.');
+      }).catch(function (e){ bkAutoEl.disabled = false; noteMsg(bkAutoMsgEl, 'Couldn’t save that — ' + e.message, true); });
+  });
+
   function loadBackupInfo(){
     bkCountsEl.textContent = 'Counting your library…';
     fetch('/api/backup/info').then(asJson).then(function (j){
@@ -2082,13 +2166,17 @@ render();
   // only when the page is served by the app. The static site never shows them.
   function initApp(){
     if (!window.RR_WORKMODE) return;
-    if (!menu.querySelector('[data-acct="updates"]')) {
+    [['updates', 'Updates'], ['diagnostics', 'Diagnostics']].forEach(function (it){
+      if (menu.querySelector('[data-acct="' + it[0] + '"]')) return;
       var u = document.createElement('button');
       u.type = 'button'; u.className = 'rr-acct-item';
-      u.setAttribute('data-acct', 'updates'); u.setAttribute('role', 'menuitem');
-      u.textContent = 'Updates';
+      u.setAttribute('data-acct', it[0]); u.setAttribute('role', 'menuitem');
+      u.textContent = it[1];
       menu.appendChild(u);
-    }
+    });
+    // under the app the reading state is saved in the library folder, not just here
+    var stateHint = document.getElementById('rr-backup-state-hint');
+    if (stateHint) stateHint.hidden = false;
     profileMdBtn.hidden = false;
     // Setup's Launch buttons: grey out assistants that aren't installed (same signal the
     // flow pickers use), so nobody launches a missing CLI and then applies into a bare shell

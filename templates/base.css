@@ -487,6 +487,11 @@ mjx-container[display="true"] { margin: 0.6em 0 1.1em; }
 }
 .lib-group select:focus { outline: none; border-color: var(--accent); }
 
+/* graph nodes are keyboard-reachable (tabindex on each <g>) — make the focus visible */
+.node:focus { outline: none; }
+.node:focus circle { stroke: var(--accent); stroke-width: 3px; }
+.node:focus-visible circle { stroke: var(--accent); stroke-width: 3px; }
+
 .lib-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0 6px; }
 .lib-actions .spacer { flex: 1; }
 .lib-check { font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft);

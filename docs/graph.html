@@ -629,6 +629,11 @@ mjx-container[display="true"] { margin: 0.6em 0 1.1em; }
 }
 .lib-group select:focus { outline: none; border-color: var(--accent); }
 
+/* graph nodes are keyboard-reachable (tabindex on each <g>) — make the focus visible */
+.node:focus { outline: none; }
+.node:focus circle { stroke: var(--accent); stroke-width: 3px; }
+.node:focus-visible circle { stroke: var(--accent); stroke-width: 3px; }
+
 .lib-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 16px 0 6px; }
 .lib-actions .spacer { flex: 1; }
 .lib-check { font-family: var(--mono); font-size: 12.5px; color: var(--ink-soft);
@@ -1050,6 +1055,18 @@ node.append('text')
   .text(d => trunc(d.label, 34));
 
 node.style('cursor', 'pointer').on('click', (e, d) => { window.location.href = d.url; });
+
+/* keyboard: every node is a link — Tab through them, Enter/Space opens.
+   A force graph is otherwise mouse-only; the papers are all listed on the
+   catalogue and Library pages, which stay the linear route through the same set. */
+node.attr('tabindex', 0)
+  .attr('role', 'link')
+  .attr('aria-label', d => d.label + (d.type === 'ghost' ? ' (not analyzed yet)' : ''))
+  .on('keydown', (e, d) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); window.location.href = d.url; }
+  })
+  .on('focus', (e, d) => { const nb = adj.get(d.id); if (nb) applyKeep(id => nb.has(id)); })
+  .on('blur', () => applyTag());
 
 /* neighbor highlighting */
 const adj = new Map(GRAPH.nodes.map(n => [n.id, new Set([n.id])]));
@@ -1502,6 +1519,8 @@ if (GRAPH.queue.length){
 .rr-bk-sub { margin-left: auto; padding-left: 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 58%; }
 .rr-bk-sub:empty { display: none; }
 .rr-bk-custom { margin-top: 8px; font-family: var(--mono); font-size: 13px; }
+.rr-bk-auto { display: flex; align-items: center; gap: 10px; padding: 7px 10px; font-size: 13.5px; }
+.rr-bk-select { width: auto; min-width: 140px; padding: 6px 10px; font-size: 13px; font-family: var(--mono); }
 .rr-bk-custom[hidden] { display: none; }
 .rr-bk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
 .rr-bk-row .rr-q-note { margin: 0; flex: 1 1 100%; line-height: 1.5; word-break: break-word; }
@@ -1592,6 +1611,20 @@ if (GRAPH.queue.length){
           <button type="button" class="rr-btn rr-btn-ghost" id="rr-backup-zip-reveal" hidden>Show in folder</button>
           <p class="rr-q-note" id="rr-backup-zip-msg" hidden></p>
         </div>
+        <p class="rr-bk-label">Automatic backups</p>
+        <div class="rr-bk-row">
+          <label class="rr-q-choice rr-bk-auto">
+            <span>Back up on its own</span>
+            <select class="rr-q-input rr-bk-select" id="rr-backup-auto">
+              <option value="0">Never</option>
+              <option value="1">Every day</option>
+              <option value="7">Every week</option>
+              <option value="30">Every month</option>
+            </select>
+          </label>
+          <p class="rr-q-note" id="rr-backup-auto-msg" hidden></p>
+        </div>
+        <p class="rr-q-hint">Automatic backups skip the PDFs (they can be downloaded again), land in the app’s backups folder, and only the five newest are kept. One is also written right before every update.</p>
       </section>
       <section class="rr-bk-sec" id="rr-backup-restore" hidden>
         <h3 class="rr-bk-h">Restore from zip</h3>
@@ -1610,7 +1643,8 @@ if (GRAPH.queue.length){
       </section>
       <section class="rr-bk-sec">
         <h3 class="rr-bk-h">Browser reading state only (JSON)</h3>
-        <p class="rr-q-hint">Your <b>reading status</b>, <b>priority stars</b>, <b>custom tags / collections</b>, dismissed graph nodes, and theme are stored in this browser only. Export them to a small JSON file to move them to another browser or device, or as a backup.</p>
+        <p class="rr-q-hint">Your <b>reading status</b>, <b>priority stars</b>, <b>custom tags / collections</b>, dismissed graph nodes, and theme live in this browser. Export them to a small JSON file to move them to another browser or device, or as a backup.</p>
+        <p class="rr-q-hint" id="rr-backup-state-hint" hidden>In the app they are also saved to <code>user/reading-state.json</code> as you go, so they survive a new browser, a different port, and a restore — this export is for moving them somewhere the app isn’t.</p>
         <p class="rr-q-hint" id="rr-backup-static-hint">Your analysed papers, comparisons and discussions are files on disk. The full zip backup — and restore — lives in the Reading Room app (avatar menu → Back up); from an assistant, <code>/backup export</code> writes the same zip.</p>
         <div class="rr-bk-row">
           <button type="button" class="rr-btn" id="rr-backup-export">Export JSON</button>
@@ -1708,6 +1742,10 @@ if (GRAPH.queue.length){
     else if (which === 'updates') {                 // app only (item added in initApp)
       if (typeof window.RR_openUpdates === 'function') window.RR_openUpdates(true);
       else flash('Checking for updates needs the app — open ReadingRoom.app (or ReadingRoom.bat).');
+    }
+    else if (which === 'diagnostics') {             // app only (item added in initApp)
+      if (typeof window.RR_openDiagnostics === 'function') window.RR_openDiagnostics();
+      else flash('Diagnostics need the app — open ReadingRoom.app (or ReadingRoom.bat).');
     }
     else openSetup();
   });
@@ -1847,6 +1885,8 @@ if (GRAPH.queue.length){
   var bkZipNameEl   = document.getElementById('rr-backup-zip-name');
   var bkImportBtn   = document.getElementById('rr-backup-zip-import');
   var bkRestoreMsgEl= document.getElementById('rr-backup-restore-msg');
+  var bkAutoEl      = document.getElementById('rr-backup-auto');
+  var bkAutoMsgEl   = document.getElementById('rr-backup-auto-msg');
   var bkZipFileEl   = document.getElementById('rr-backup-zipfile');
   function isStateKey(k){ return /^rr-(status|prio|tags)-/.test(k) || k === 'rr-dismissed' || k === 'rr-theme'; }
   function stateKeys(){
@@ -1883,12 +1923,32 @@ if (GRAPH.queue.length){
     if (wm) {
       noteMsg(bkZipMsgEl, ''); noteMsg(bkRestoreMsgEl, '');
       bkRevealBtn.hidden = true; lastZip = null; bkExportBtn.disabled = false;
-      resetPick(); loadBackupInfo();
+      resetPick(); loadBackupInfo(); loadBackupPrefs();
     }
     openModal(backupModal);
   }
 
   /* ---- full zip (app only) ---- */
+  function loadBackupPrefs(){
+    if (!bkAutoEl) return;
+    noteMsg(bkAutoMsgEl, '');
+    fetch('/api/backup/prefs').then(asJson).then(function (j){
+      if (!j || !j.ok) return;
+      bkAutoEl.value = String(j.autoBackupDays || 0);
+      if (j.lastBackupAgeDays != null) noteMsg(bkAutoMsgEl, j.lastBackupAgeDays === 0 ? 'Last backup: today' : ('Last backup: ' + j.lastBackupAgeDays + ' day' + (j.lastBackupAgeDays === 1 ? '' : 's') + ' ago'));
+    }).catch(function (){});
+  }
+  if (bkAutoEl) bkAutoEl.addEventListener('change', function (){
+    var v = parseInt(bkAutoEl.value, 10) || 0;
+    bkAutoEl.disabled = true;
+    fetch('/api/backup/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ autoBackupDays: v }) })
+      .then(asJson).then(function (j){
+        bkAutoEl.disabled = false;
+        if (!j || !j.ok) throw new Error((j && j.error) || 'could not save');
+        noteMsg(bkAutoMsgEl, v ? ('Backing up every ' + (v === 1 ? 'day' : v === 7 ? 'week' : 'month') + '.') : 'Automatic backups are off.');
+      }).catch(function (e){ bkAutoEl.disabled = false; noteMsg(bkAutoMsgEl, 'Couldn’t save that — ' + e.message, true); });
+  });
+
   function loadBackupInfo(){
     bkCountsEl.textContent = 'Counting your library…';
     fetch('/api/backup/info').then(asJson).then(function (j){
@@ -2411,13 +2471,17 @@ if (GRAPH.queue.length){
   // only when the page is served by the app. The static site never shows them.
   function initApp(){
     if (!window.RR_WORKMODE) return;
-    if (!menu.querySelector('[data-acct="updates"]')) {
+    [['updates', 'Updates'], ['diagnostics', 'Diagnostics']].forEach(function (it){
+      if (menu.querySelector('[data-acct="' + it[0] + '"]')) return;
       var u = document.createElement('button');
       u.type = 'button'; u.className = 'rr-acct-item';
-      u.setAttribute('data-acct', 'updates'); u.setAttribute('role', 'menuitem');
-      u.textContent = 'Updates';
+      u.setAttribute('data-acct', it[0]); u.setAttribute('role', 'menuitem');
+      u.textContent = it[1];
       menu.appendChild(u);
-    }
+    });
+    // under the app the reading state is saved in the library folder, not just here
+    var stateHint = document.getElementById('rr-backup-state-hint');
+    if (stateHint) stateHint.hidden = false;
     profileMdBtn.hidden = false;
     // Setup's Launch buttons: grey out assistants that aren't installed (same signal the
     // flow pickers use), so nobody launches a missing CLI and then applies into a bare shell

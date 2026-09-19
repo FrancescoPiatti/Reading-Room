@@ -14,6 +14,8 @@
     "primary_tag": "deep-learning",
     "bibkey": "vaswani2017attention",
     "bibtex": "@inproceedings{vaswani2017attention,\n  title = {Attention Is All You Need},\n  author = {Ashish Vaswani and Noam Shazeer and Niki Parmar and Jakob Uszkoreit and Llion Jones and Aidan N. Gomez and Łukasz Kaiser and Illia Polosukhin},\n  booktitle = {Advances in Neural Information Processing Systems 30 (NIPS 2017)},\n  year = {2017},\n  url = {https://arxiv.org/abs/1706.03762}\n}",
+    "tldr": "Replaces recurrence and convolution entirely with (multi-head) self-attention, yielding a sequence-transduction architecture — the Transformer — that is more parallelizable, trains in a fraction of the time, and sets new single-model state of the art on WMT 2014 translation (28.4 BLEU EN–DE, 41.8 BLEU EN–FR).",
+    "updated": 1789235397,
     "url": "papers/1706.03762/index.html"
   },
   {
@@ -30,6 +32,8 @@
     "primary_tag": "deep-learning",
     "bibkey": "hornik1989multilayer",
     "bibtex": "@article{DBLP:journals/nn/HornikSW89,\n  author    = {Kurt Hornik and Maxwell B. Stinchcombe and Halbert White},\n  title     = {Multilayer feedforward networks are universal approximators},\n  journal   = {Neural Networks},\n  volume    = {2},\n  number    = {5},\n  pages     = {359--366},\n  year      = {1989},\n  url       = {https://doi.org/10.1016/0893-6080(89)90020-8},\n  doi       = {10.1016/0893-6080(89)90020-8}\n}",
+    "tldr": "Single-hidden-layer feedforward networks with an arbitrary squashing activation can approximate any continuous function uniformly on compacta and any Borel measurable function in probability — so failures in practice must come from learning, too few hidden units, or noise, never from the architecture class itself.",
+    "updated": 1789235397,
     "url": "papers/hornik1989/index.html"
   }
 ]

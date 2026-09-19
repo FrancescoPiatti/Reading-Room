@@ -153,6 +153,10 @@ def load_digests():
         # build never clobbers your prose (A1).
         notes = path.parent / "notes.md"
         data["_notes"] = notes.read_text(encoding="utf-8").strip() if notes.exists() else ""
+        try:
+            data["_updated"] = int(path.stat().st_mtime)     # catalogue/library "recently updated" sort
+        except OSError:
+            data["_updated"] = 0
         digests.append(sanitize_digest(data, f"digest {path.parent.name}"))
     return digests, skipped
 
@@ -634,6 +638,8 @@ def build_library(digests):
             "primary_tag": tags[0] if tags else "untagged",
             "bibkey": key,
             "bibtex": bib,
+            "tldr": d.get("tldr") or "",      # the Library filter searches it too
+            "updated": d.get("_updated") or 0,
             "url": f"papers/{d['id']}/index.html",
         })
     items.sort(key=lambda x: (-(x["year"] or 0), x["title"].lower()))
@@ -1088,6 +1094,7 @@ def main():
         (out / "cite.bib").write_text(bibtex + "\n", encoding="utf-8")
         entry = {k: d.get(k) for k in INDEX_FIELDS if d.get(k) is not None}
         entry["text"] = section_text(d)   # full-text search over report bodies
+        entry["updated"] = d.get("_updated") or 0
         catalogue.append(entry)
         print(f"  ✓ {d['id']}")
 

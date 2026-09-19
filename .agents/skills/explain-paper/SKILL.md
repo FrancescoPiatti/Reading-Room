@@ -19,7 +19,7 @@ Resolve it to a PDF and an `id` slug:
 - **arXiv id** (e.g. `2402.01234`, may have a version like `v2`): download with
   `curl -L -o papers/<id>.pdf https://arxiv.org/pdf/<id>.pdf`, and set `id` to the arXiv id (dots → keep, slashes → `-`). Record `source_url` as `https://arxiv.org/abs/<id>`.
 - **URL to a PDF**: download it into `papers/`, derive a short `id` slug from the title later.
-- **Local path**: use it directly; derive `id` from the filename (lowercase, non-alphanumerics → `-`).
+- **Local path**: use it directly; derive `id` from the filename (lowercase, non-alphanumerics → `-`). A path that is already inside the library (`papers/<slug>.pdf` — what the app's **Choose PDF** / drag-and-drop writes) is the normal case for a paper that isn't on arXiv: read it where it is, don't copy it, and use `<slug>` as the `id`.
 
 Then **read the PDF** directly with the running assistant's PDF-capable file reader — render pages so you can see equations, figures, and tables. Read the whole thing, appendices included if present. (A configured PDF-viewer connector, if present, is an alternative.) Only if rendering is unavailable, fall back to a text extraction — and write it to `.cache/<id>.txt` (gitignored), **never** beside the PDF in `papers/`. Don't leave `.txt` files in `papers/`.
 

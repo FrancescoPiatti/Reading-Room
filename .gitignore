@@ -42,6 +42,9 @@ notes/
 # archive.py backup zips (your data — keep them out of the code repo)
 backups/
 
+# packaged release zips (scripts/package_release.sh) — published as release assets
+dist/
+
 # Claude Code per-user local state (not for the shared template)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
