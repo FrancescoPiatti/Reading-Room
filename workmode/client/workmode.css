@@ -378,8 +378,8 @@ select.rr-flow-select { appearance: auto; -webkit-appearance: menulist; cursor: 
    Setup modal that started it — without closing them, so their Continue / Apply
    buttons stay reachable. body.rr-term-front is set by the client for exactly
    that window; the covered panels leave room above the drawer. */
-body.rr-term-front .rr-wm-drawer { z-index: 10090; box-shadow: 0 -14px 44px rgba(10, 12, 18, 0.28); }
-body.rr-term-front .rr-analyze-body { padding-bottom: calc(var(--rr-wm-h) + 24px); }
+body.rr-term-front .rr-wm-drawer { z-index: 10090; height: min(var(--rr-wm-h), 44vh); box-shadow: 0 -14px 44px rgba(10, 12, 18, 0.28); }   /* a drawer dragged tall must not swallow the card above it */
+body.rr-term-front .rr-analyze-body { padding-bottom: calc(min(var(--rr-wm-h), 44vh) + 24px); }
 body.rr-term-front .rr-modal { align-items: flex-start; padding-bottom: calc(var(--rr-wm-h) + 24px); }
 body.rr-term-front .rr-modal-card { max-height: calc(100vh - var(--rr-wm-h) - 48px); }
 body.rr-term-front .rr-setup-busy { padding-bottom: calc(var(--rr-wm-h) + 24px); }

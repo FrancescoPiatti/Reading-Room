@@ -239,9 +239,9 @@
     main: { label: 'Terminal', icon: ICO_TERM, run: function (){ toggleDrawer(); } },
     switchLabel: 'Launch an AI',
     items: [
-      { key: 'claude', label: 'Launch claude', icon: ICO_BOT, run: function (){ abandonRuns(); launchAgent('claude'); } },
-      { key: 'codex',  label: 'Launch codex',  icon: ICO_BOT, run: function (){ abandonRuns(); launchAgent('codex'); } },
-      { key: 'gemini', label: 'Launch gemini', icon: ICO_BOT, run: function (){ abandonRuns(); launchAgent('gemini'); } },
+      { key: 'claude', label: 'Launch claude', icon: ICO_BOT, run: function (){ manualLaunch('claude'); } },
+      { key: 'codex',  label: 'Launch codex',  icon: ICO_BOT, run: function (){ manualLaunch('codex'); } },
+      { key: 'gemini', label: 'Launch gemini', icon: ICO_BOT, run: function (){ manualLaunch('gemini'); } },
       { key: 'settings', label: 'Assistant settings…', icon: ICO_GEAR, run: function (){ openAiCfgModal(); } },
     ],
   });
@@ -386,7 +386,7 @@
         jobOnBroadcast(m);                          // a hidden Analyze/Compare/Deep dive may be waiting for this
         if (m.type === 'chat-added') {
           if (discuss) discussSaved();              // the running discussion compacted → tell the server (job-end)
-          if (!job) toast('Discussion saved — ' + m.slug, 'Open', function (){ location.href = '/chat/' + encodeURIComponent(m.slug) + '/'; });
+          if (!job){ toastHoldUntil = Date.now() + 8000; toast('Discussion saved — ' + m.slug, 'Open', function (){ location.href = '/chat/' + encodeURIComponent(m.slug) + '/'; }); }
         }
       }
       else if (m.type === 'agent-exited') { agentLive = false; if (bootWatch) bootWatch.cancel(); agentGone(); onAgentExited(); }   // the shell has had no child for a while: the assistant is gone
@@ -501,6 +501,7 @@
   function raiseDrawer(){ document.body.classList.add('rr-term-front'); }
   function lowerDrawer(){ document.body.classList.remove('rr-term-front'); }
   function termHasFocus(){ var a = document.activeElement; return !!(a && termWrap.contains(a)); }
+  function setupOpen(){ return !!document.querySelector('#rr-setup-modal:not([hidden])'); }   // Setup keeps the raised drawer until Apply or close
   function toggleDrawer(){ isOpen() ? closeDrawer() : openDrawer(); }
 
   closeBtn.addEventListener('click', closeDrawer);
@@ -516,7 +517,7 @@
     setHint('ending chat — the agent will compact it');
     if (term) term.focus();
   });
-  document.addEventListener('keydown', function (e){ if (e.key === 'Escape' && isOpen() && !termHasFocus() && !(pdfOv && pdfOv.classList.contains('rr-show')) && !(notesOv && notesOv.classList.contains('rr-show')) && !(profOv && profOv.classList.contains('rr-show')) && !(flowOv && flowOv.classList.contains('rr-show'))) closeDrawer(); });
+  document.addEventListener('keydown', function (e){ if (e.key === 'Escape' && isOpen() && !termHasFocus() && !document.querySelector('.rr-modal:not([hidden])') && !(pdfOv && pdfOv.classList.contains('rr-show')) && !(notesOv && notesOv.classList.contains('rr-show')) && !(profOv && profOv.classList.contains('rr-show')) && !(flowOv && flowOv.classList.contains('rr-show'))) closeDrawer(); });
 
   // pre-type a command (no Enter): user reviews + runs it, prompts preserved.
   // Clears the line first so switching commands (or to a launch) never accumulates
@@ -601,8 +602,10 @@
   /* ----------------------------------------------------- rebuild → refresh */
   // A digest landed and the server rebuilt docs/. Offer a refresh; do NOT
   // auto-reload (that would drop a terminal session mid-command).
+  var toastHoldUntil = 0;                        // a toast with an action the reader still needs (Open) outranks the refresh nudge
   function onRebuilt(){
     setHint('');
+    if (Date.now() < toastHoldUntil) return;
     toast('Library updated — refresh to see it', 'Refresh', function (){ location.reload(); });
   }
 
@@ -615,11 +618,14 @@
   // Setup's "Launch claude/codex/gemini": a visible launch with the drawer RAISED above the
   // Setup modal, which stays open behind it — the reader answers the assistant there and
   // applies from the modal (it follows along through the rr-agent-state events)
-  window.RR_launchAgent = function (name){
+  // a launch by hand (Terminal ▾, Setup) never kills a run in progress unannounced — the
+  // shared pty means a respawn ends whatever is running, even a run another window owns
+  function manualLaunch(name, opts){
     if (job && job.started){ toast('A paper is being written right now — wait for it, or Stop it from its card, before launching an assistant'); return false; }
     if (discuss && discuss.started){ toast('A discussion is running — End chat (or Stop it) before launching an assistant'); return false; }
-    abandonRuns(); launchAgent(name, { raise: true }); return true;
-  };
+    abandonRuns(); launchAgent(name, opts); return true;
+  }
+  window.RR_launchAgent = function (name){ return manualLaunch(name, { raise: true }); };
   window.RR_openTerminal = function (){ openDrawer(); };           // Setup busy-box "Show terminal"
   // Setup's Apply: send cmd to the launched assistant. Only when it is READY (its prompt
   // was seen) or in an unrecognised state the reader vouches for — never into a trust or
@@ -637,6 +643,7 @@
     return true;
   };
   window.RR_agentState = function (){ return { name: launchedAi, live: agentLive, needsYou: bootWatch ? bootWatch.needsYou : null }; };
+  window.RR_lowerTerminal = lowerDrawer;             // Setup closed while its terminal was raised
   window.RR_terminalHasFocus = termHasFocus;
 
   window.RR_dismissGhost = function (d){
@@ -806,8 +813,9 @@
         var ai = chosenAi();
         abandonRuns();
         setHint('launching ' + ai + ' to review your profile …');
-        launchAgent(ai, { cmd: flowCommand(ai, '/setup --review-profile'), onSent: function (){ setHint('the assistant is reviewing your profile — follow along here'); } });
-        toast('Profile saved — ' + ai + ' is reviewing it in the terminal');
+        launchAgent(ai, { cmd: flowCommand(ai, '/setup --review-profile'),
+          onSent: function (){ setHint('the assistant is reviewing your profile — follow along here'); toast('Profile saved — ' + ai + ' is reviewing it in the terminal'); },
+          onFail: function (why){ toast('Profile saved, but ' + ai + (why === 'exited' ? ' closed before it could review it' : ' isn’t installed here') + ' — open the Terminal and run /setup --review-profile when you like'); } });
       });
     });
     profOv._ta = ta; profOv._save = save;
@@ -904,6 +912,16 @@
       .replace(/[\s\x00-\x1f\x7f]+/g, '')
       .toLowerCase();
   }
+  // "zsh: command not found: claude", "bash: claude: command not found", cmd.exe "'claude' is not
+  // recognized as an internal…", PowerShell "The term 'claude' is not recognized…": the line must
+  // name the launched binary, bounded by whitespace/quotes — a shell rc that sources a missing
+  // file prints "no such file or directory" too, and ".claude/…" paths contain the word
+  function missingRe(name){
+    var n = String(name || '').replace(/[^a-z0-9]/gi, '');
+    var pre = "(?:^|[\\s'\"`:])", post = "(?=$|[\\s'\"`:,.])";
+    return new RegExp('(?:command not found|not recognized|no such file or directory|not found)[^\\n]{0,60}' + pre + n + post
+                    + '|' + pre + n + post + '[^\\n]{0,60}(?:command not found|not recognized|not found)', 'im');
+  }
   function dialogReason(flat){
     if (/trust|safetycheck/.test(flat)) return 'trust';
     if (/login|signin|authenticat|pastecode|usetheurl/.test(flat)) return 'login';
@@ -934,7 +952,7 @@
   function makeBootWatch(name, opts){
     opts = opts || {};
     var w = { name: name, cmd: opts.cmd || null, t0: Date.now(), text: '', dialogAt: -1, lastDialogAt: 0, needsYou: null, readyAt: 0, answered: 0, sent: false, done: false, iv: null };
-    function finish(){ w.done = true; clearInterval(w.iv); if (bootWatch === w) bootWatch = null; renderContinue(); }
+    function finish(){ w.done = true; clearInterval(w.iv); if (bootWatch === w) bootWatch = null; renderContinue(); if (!setupOpen()) lowerDrawer(); }
     function sendNow(){
       if (w.sent || w.done) return;
       w.sent = true; agentLive = true;
@@ -955,7 +973,7 @@
     w.note = function (chunk){
       if (w.done) return;
       var raw = String(chunk == null ? '' : chunk);
-      if (/command not found|is not recognized as an internal|No such file or directory|not found: /i.test(raw)){
+      if (missingRe(name).test(raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, ''))){
         finish(); agentLive = false;
         setHint(name + ' is not installed here — install it, then launch again'); keepHintUntil = Date.now() + 8000;
         toast(name + ' isn’t installed (or not on PATH) — see the install steps in the README');
@@ -970,7 +988,7 @@
       if (dEnd !== -1){
         w.lastDialogAt = Date.now(); w.readyAt = 0;
         w.dialogAt = w.text.length - (probe.length - dEnd);   // readiness counts only after this
-        var reason = dialogReason(probe.slice(Math.max(0, dEnd - 60), dEnd));
+        var reason = dialogReason(probe.slice(0, dEnd));          // the whole fragment: codex ends in "press enter to continue" but asked about trust
         if (w.needsYou !== reason) needsYou(reason);
         // the same chunk may already hold the NEXT screen (codex answers Enter inline)
         probe = probe.slice(dEnd);
@@ -1005,15 +1023,19 @@
     w.iv = setInterval(function (){
       if (w.done) return;
       var now = Date.now();
-      // waiting on the reader (or on the screen after a dialog): is the assistant still there?
-      if ((w.needsYou || w.dialogAt >= 0) && !w.readyAt && now - childPollAt >= 3000){ childPollAt = now; pollChildren(); }
+      // waiting on the reader (or on the screen after a dialog), or idle after ready with no
+      // command to send (Setup): is the assistant still there?
+      if (((w.needsYou || w.dialogAt >= 0) && !w.readyAt || w.idle) && now - childPollAt >= 3000){ childPollAt = now; pollChildren(); }
       if (w.readyAt){
-        if (now - w.readyAt >= BOOT_SETTLE_MS){ if (w.cmd) sendNow(); else finish(); }
+        if (now - w.readyAt >= BOOT_SETTLE_MS){
+          if (w.cmd) sendNow();
+          else if (!w.idle){ w.idle = true; renderContinue(); if (!setupOpen()) lowerDrawer(); }   // ready and idle: keep an eye on it until Apply / a new launch
+        }
         return;
       }
       // they pressed Enter on a dialog, nothing new was asked, and no prompt we recognise
       // has appeared: hand over a Continue rather than guessing
-      if (w.needsYou && w.needsYou !== 'unknown' && w.answered && now - w.answered > 2500 && now - w.lastDialogAt > 2500) needsYou('unknown');
+      if (w.needsYou && w.needsYou !== 'unknown' && w.answered && now - w.answered > 8000 && now - w.lastDialogAt > 8000) needsYou('unknown');
       if (!w.needsYou && now - w.t0 >= BOOT_CAP_MS) needsYou('unknown');
     }, 200);
     return w;
@@ -1196,7 +1218,9 @@
     afterFlush = null;                            // never let the flow command land in a later shell
     lowerDrawer();
     text = text || 'Stopped — nothing was added to your library.';
+    if (j.spec.stoppedNote){ var note = j.spec.stoppedNote(); if (note) text += ' ' + note; }
     if (!j.started){
+      if (j.needsYou){ keepHintUntil = 0; setHint(''); closeDrawer(); }   // the app opened it for the dialog; the shell is being killed
       // no token = "kill the booting assistant only": the server rolls back nothing
       if (reason === 'user') send({ type: 'job-stop', reason: 'user' });
       else if (!arguments[1]) text = 'The assistant didn’t start (or quit before the command was sent). Open the terminal to see what happened. Nothing was added to your library.';
@@ -1441,7 +1465,7 @@
     document.addEventListener('keydown', function (e){
       if (!current) return;
       if (e.key === 'Tab'){
-        if (termHasFocus()) return;                  // the raised terminal is its own focus world
+        if (termHasFocus() || document.body.classList.contains('rr-term-front')) return;   // the raised terminal must stay reachable
         var f = focusables(current);
         if (!f.length) return;
         var first = f[0], last = f[f.length - 1], a = document.activeElement;
@@ -1515,7 +1539,9 @@
       metaTime.textContent = 'Running ' + fmtElapsed(Date.now() - job.sentAt);
       metaLine.textContent = lastOutLine ? ('· ' + lastOutLine) : '';
     }, 1000);
-    run.appendChild(el('div', 'rr-analyze-sub2', 'You can close this and keep browsing — I’ll let you know when it’s ready. Closing the window is fine too: the app keeps the run going and finishes writing.'));
+    run.appendChild(el('div', 'rr-analyze-sub2', (job && job.needsYou)
+      ? 'The run starts once you’ve answered the assistant — keep this page open until then.'
+      : 'You can close this and keep browsing — I’ll let you know when it’s ready. Closing the window is fine too: the app keeps the run going and finishes writing.'));
     if (!noStop){
       // Stop → confirm row → job-stop 'user' (kills the assistant, rolls the library back)
       var stopWrap = el('div', 'rr-analyze-stop');
@@ -2015,6 +2041,7 @@
       // a queue keeps going instead of showing the single-paper done card
       onDone: q ? function (id){ q.done.push(id); q.idx++; setTimeout(queueNext, 600); return true; } : null,
       onStopped: q ? function (){ analyzeQueue = null; } : null,
+      stoppedNote: q ? function (){ return q.done.length ? ('The ' + q.done.length + ' paper' + (q.done.length === 1 ? '' : 's') + ' already added (' + q.done.join(', ') + ') stay in your library.') : ''; } : null,
       again: function (){ openAnalyze(); }, againLabel: 'Analyze another',   // wrapped: a raw handler would pass the click event as prefill
     });
   }
@@ -2180,7 +2207,7 @@
     if (bootWatch) bootWatch.cancel();
     afterFlush = null;
     endChatBtn.hidden = true; stopChatBtn.hidden = true;
-    if (d.started) withToken(d, function (token){ send({ type: 'job-stop', reason: 'exited', token: token }); });   // roll back a half-written chat
+    if (d.started) whenTermReady(function (){ withToken(d, function (token){ send({ type: 'job-stop', reason: 'exited', token: token }); }); }, function (){});   // roll back a half-written chat (the socket may still be opening)
     setHint('discussion ended without saving');
     toast(text || 'The discussion ended before it was saved — nothing was added to your library.');
   }
@@ -2420,7 +2447,9 @@
     var ai = chosenAi();
     setHint('launching ' + ai + ' to run /update …');
     abandonRuns();                                   // a hidden run or discussion can't survive the respawn
-    launchAgent(ai, { cmd: flowCommand(ai, '/update'), onSent: function (){ setHint('/update is running — follow along here'); } });
+    launchAgent(ai, { cmd: flowCommand(ai, '/update'),
+      onSent: function (){ setHint('/update is running — follow along here'); },
+      onFail: function (why){ toast(ai + (why === 'exited' ? ' closed before /update could start' : ' isn’t installed here') + ' — open the Terminal and run /update yourself'); } });
   }
   // avatar menu "Updates" (force → refresh=1 re-fetches origin)
   window.RR_openUpdates = function (force){
@@ -2507,6 +2536,7 @@
     var id = sj.id || '';
     if (sj.kind === 'discuss'){
       discuss = { id: id, started: true, token: sj.token };
+      if (sj.exited){ discussOnExit('The assistant running that discussion had already quit before this page opened — nothing was saved.'); return; }
       endChatBtn.hidden = false; stopChatBtn.hidden = false;
       setHint('a discussion is running — End chat saves it, Stop discussion discards it');
       toast('A discussion is still running' + (id ? (' about ' + id) : ''), 'Show terminal', function (){ openDrawer(); });   // the drawer never opens itself

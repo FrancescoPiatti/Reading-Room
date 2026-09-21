@@ -1183,6 +1183,7 @@ body.rr-modal-open { overflow: hidden; }
 .rr-setup-agent--ready { border-color: var(--accent); color: var(--ink); }
 .rr-setup-agent--gone { color: var(--rr-danger); }
 .rr-setup-agent[hidden] { display: none; }
+.rr-setup-agent-term { margin-left: 10px; padding: 4px 12px; font-size: 12px; vertical-align: middle; }
 .rr-bk-select { width: auto; min-width: 140px; padding: 6px 10px; font-size: 13px; font-family: var(--mono); }
 .rr-bk-custom[hidden] { display: none; }
 .rr-bk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
@@ -1421,6 +1422,7 @@ body.rr-modal-open { overflow: hidden; }
   }
   function closeModal(m){
     m.setAttribute('hidden','');
+    if (m === setupModal && typeof window.RR_lowerTerminal === 'function') window.RR_lowerTerminal();   // its raised terminal, if any, goes back under
     if (!document.querySelector('.rr-modal:not([hidden])')) document.body.classList.remove('rr-modal-open');
     if (lastFocus && lastFocus.focus) lastFocus.focus();
     // closing the tutorial (any way — Finish, Skip, ×, backdrop, Esc) marks it seen and,
@@ -1451,7 +1453,7 @@ body.rr-modal-open { overflow: hidden; }
   // to the (blurred, inert-looking) page underneath
   document.addEventListener('keydown', function (e){
     if (e.key !== 'Tab') return;
-    if (inTerminal()) return;                        // the raised terminal is its own focus world
+    if (inTerminal() || document.body.classList.contains('rr-term-front')) return;   // the raised terminal must stay reachable
     var open = document.querySelector('.rr-modal:not([hidden])');
     if (!open) return;
     var els = Array.prototype.filter.call(
@@ -1802,7 +1804,7 @@ body.rr-modal-open { overflow: hidden; }
     if (autoOpenTimer) { clearTimeout(autoOpenTimer); autoOpenTimer = null; }
     // closed part-way (× or Esc), or an assistant was launched from the last step: pick up
     // where it was — eleven answers are not something to retype
-    var resume = ans && idx > 0 && !(launchedState === 'gone');
+    var resume = ans && idx > 0;
     if (!resume) { ans = seed(); idx = 0; tagsTouched = false; }
     renderStep(); openModal(setupModal);
   }
@@ -1844,10 +1846,12 @@ body.rr-modal-open { overflow: hidden; }
     // on the last step, the Launch AI (Claude/Codex/Gemini) buttons appear in the footer — you
     // must launch one for Finish to apply (it runs /setup in that terminal).
     if (last) {
-      html = '<div class="rr-setup-agent" id="rr-setup-agent" hidden></div>' + html
-        + '<p class="rr-q-note"><b>Launch an AI (Claude, Codex, or Gemini)</b> below. The terminal opens on top of this window — if it asks you to trust this folder or to log in, answer there. Then press <b>Apply setup</b> (close the terminal or leave it open): it runs <code>/setup</code> to write your profile.</p>';
+      html = '<div class="rr-setup-agent" id="rr-setup-agent" hidden></div>' + html + (window.RR_WORKMODE
+        ? '<p class="rr-q-note"><b>Launch an AI (Claude, Codex, or Gemini)</b> below. The terminal opens on top of this window — if it asks you to trust this folder or to log in, answer there. Then press <b>Apply setup</b> (close the terminal or leave it open): it runs <code>/setup</code> to write your profile.</p>'
+        : '<p class="rr-q-note"><b>Finish</b> shows your answers as a profile to paste into <code>user/profile.json</code>, with <code>/setup</code> to run in your assistant — or open the app and use Setup there, where it applies itself.</p>');
     }
     bodyEl.innerHTML = html;
+    Array.prototype.forEach.call(launchWrap.querySelectorAll('[data-rr-agent]'), function (b){ b.hidden = !window.RR_WORKMODE; });   // no terminal to launch into on the static site
     if (last && launchedName) showLaunchState(launchedState, launchedName, launchedReason);   // reopened after a launch: keep showing where the assistant is
     stepEl.textContent = 'Step ' + (idx + 1) + ' of ' + STEPS.length;
     barEl.style.width = Math.round(((idx + 1) / STEPS.length) * 100) + '%';
@@ -1941,6 +1945,11 @@ body.rr-modal-open { overflow: hidden; }
     box.hidden = false;
     box.className = 'rr-setup-agent rr-setup-agent--' + state;
     box.textContent = agentStateText(state, name, reason);
+    if (state !== 'gone' && typeof window.RR_openTerminal === 'function') {   // the drawer may have been closed: bring it back from here
+      var t = document.createElement('button'); t.type = 'button'; t.className = 'rr-btn rr-btn-ghost rr-setup-agent-term'; t.textContent = 'Show terminal';
+      t.addEventListener('click', function (){ window.RR_openTerminal(); });
+      box.appendChild(t);
+    }
     finishBtn.disabled = (state === 'gone');
   }
   window.addEventListener('rr-agent-state', function (e){
@@ -2022,9 +2031,16 @@ body.rr-modal-open { overflow: hidden; }
   finishBtn.addEventListener('click', function (){
     var prof = assemble();
     if (window.RR_WORKMODE) {
+      // the assistant must be able to take /setup NOW — the intake file is written only then
+      // (a refused Apply used to leave a stale intake behind for a later hand-run /setup)
+      var pre = (typeof window.RR_agentState === 'function') ? window.RR_agentState() : null;
+      if (!pre || !pre.name) { flash('Launch an AI (Claude, Codex, or Gemini) first (button below), then press Apply setup.'); return; }
+      if (!(pre.live || pre.needsYou === 'unknown')) {
+        flash(pre.needsYou && pre.needsYou !== 'unknown' ? agentStateText('needs-you', pre.name, pre.needsYou)
+          : pre.name + ' isn’t ready yet — if it is asking you something, answer in the terminal, then press Apply setup again.');
+        return;
+      }
       finishBtn.disabled = true;
-      // auto-run /setup in the terminal where you launched the AI — without opening or
-      // raising the drawer. Needs a running agent (hence the note + guard).
       postIntakeThenSetup(prof).then(function (sent){
         finishBtn.disabled = false;
         if (sent) { closeModal(setupModal); setupBusy('show'); return; }

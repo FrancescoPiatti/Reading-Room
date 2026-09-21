@@ -1623,11 +1623,13 @@ function pollJob() {
 // (maybeShutdown / idleQuit wait on activeJob). After a grace period with still no
 // window, roll it back ourselves. A page that connects meanwhile gets the truth from
 // /api/status (job.exited) and decides instead.
-let deadRunTimer = null;
+let deadRunTimer = null, deadRunJob = null;
 function scheduleDeadRunCleanup(job) {
-  if (deadRunTimer) return;
+  if (deadRunTimer && deadRunJob === job) return;
+  if (deadRunTimer) clearTimeout(deadRunTimer);       // a newer dead run supersedes the old timer
+  deadRunJob = job;
   deadRunTimer = setTimeout(() => {
-    deadRunTimer = null;
+    deadRunTimer = null; deadRunJob = null;
     if (activeJob !== job || clients.size > 0) return;
     console.log('  • no window to answer for the dead ' + job.kind + ' run — rolling it back');
     stopJob(null, 'exited');
@@ -1701,6 +1703,8 @@ function stopJob(ws, reason) {
 // Quit when the last app window goes away (after a grace period so a page reload
 // or internal navigation — which briefly drops to 0 clients — doesn't kill it).
 let shutdownTimer = null;
+let noWindowLogged = false;                          // the "staying up" line once, not every 5 s
+const NO_WINDOW_RUN_CAP_MS = 3 * 60 * 60 * 1000;     // a run nobody is watching gets three hours
 function maybeShutdown() {
   if (KEEPALIVE || clients.size > 0) return;
   if (shutdownTimer) return;
@@ -1710,10 +1714,16 @@ function maybeShutdown() {
     // A hidden run outlives the window that started it: closing the tab mid-analyze
     // used to kill the assistant and lose the report. Wait for the job to land (the
     // watcher still completes it and writes the page), then quit.
-    if (activeJob) {
-      console.log('  • window closed while a run is in progress — staying up until it finishes');
+    if (activeJob || building || buildQueued) {
+      if (activeJob && Date.now() - Date.parse(activeJob.startedAt || 0) > NO_WINDOW_RUN_CAP_MS) {
+        console.log('  • the ' + activeJob.kind + ' run has been going for hours with no window — giving up on it');
+        stopJob(null, 'exited');                     // rolls back what it started, then this tick comes round again
+        return maybeShutdown();
+      }
+      if (!noWindowLogged) { noWindowLogged = true; console.log('  • window closed while ' + (activeJob ? 'a run is in progress' : 'the site rebuilds') + ' — staying up until it finishes'); }
       return maybeShutdown();
     }
+    noWindowLogged = false;
     console.log('\n  app window closed — shutting down. bye');
     killTerm();
     process.exit(0);
@@ -1722,6 +1732,7 @@ function maybeShutdown() {
 
 wss.on('connection', (ws) => {
   clients.add(ws);
+  noWindowLogged = false;
   if (shutdownTimer) { clearTimeout(shutdownTimer); shutdownTimer = null; } // a window is back
   if (lastBuildError) {
     // the site on screen is stale — tell this page what went wrong at (re)build time
@@ -1761,6 +1772,7 @@ wss.on('connection', (ws) => {
         // a registered run would die silently with the old shell — stop it properly
         // (kill its process tree, roll back, answer job-stopped) instead of orphaning it
         console.log('  • respawn while a ' + activeJob.kind + ' run is registered — stopping it first');
+        broadcast({ type: 'agent-exited', kind: activeJob.kind, id: activeJob.id });   // the page that owns the run (maybe another window) learns it ended
         stopJob(ws, 'user');
       } else {
         killTerm();
