@@ -2289,7 +2289,9 @@ if (GRAPH.queue.length){
     if (state === 'starting') return name + ' is starting in the terminal below…';
     if (state === 'ready') return '✓ ' + name + ' is ready — press Apply setup.';
     if (state === 'sent') return name + ' is applying your setup…';
-    if (state === 'gone') return name + ' closed before setup was applied — launch it again.';
+    if (state === 'gone') return reason === 'missing'
+      ? name + ' isn’t installed here (or isn’t on the shell’s PATH) — the README has the install steps. Install it, then launch again.'
+      : name + ' closed before setup was applied — launch it again.';
     if (reason === 'trust') return name + ' is asking whether to trust this folder — choose Yes in the terminal below. Then press Apply setup.';
     if (reason === 'login') return name + ' wants you to log in — follow the steps in the terminal below. Then press Apply setup.';
     if (reason === 'confirm') return name + ' is asking you to confirm something in the terminal below. Answer it, then press Apply setup.';
