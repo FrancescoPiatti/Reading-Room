@@ -119,7 +119,8 @@ const DISMISSED = userPath('dismissed.json');
 const STATE_MAX_VALUE = 4000;      // one collection list for one paper; far above real use
 const STATE_MAX_KEYS = 20000;
 function isStateKey(k) {
-  return /^rr-(?:status|prio|tags)-[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(k) || k === 'rr-dismissed' || k === 'rr-theme';
+  return /^rr-(?:status|prio|tags)-[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(k) || k === 'rr-dismissed' || k === 'rr-theme'
+    || k === 'rr-sort' || /^rr-wm-(?:ai|ai-cfg|flow|sr)$/.test(k);   // app preferences travel with the install too
 }
 function readState() {
   const out = {};
@@ -415,8 +416,16 @@ app.get('/api/status', (req, res) => {
     startedAt: STARTED_AT,
     restartable: RESTARTABLE,
     restartPending,
-    job: activeJob ? { kind: activeJob.kind, id: activeJob.id, startedAt: activeJob.startedAt, token: activeJob.token } : null,
+    job: activeJob ? { kind: activeJob.kind, id: activeJob.id, startedAt: activeJob.startedAt, token: activeJob.token, exited: !!activeJob.exitAnnounced } : null,
   });
+});
+
+// Does the shared shell still have a child (the assistant)? The client's boot watcher
+// asks while an assistant is waiting on the reader, so "No, exit" or a crash during a
+// trust/login dialog is noticed instead of the next keystrokes landing in a bare shell.
+// null = unknown (a tmux/screen client, no shell).
+app.get('/api/term-children', (req, res) => {
+  countShellChildren((n) => res.json({ ok: true, children: n }));
 });
 
 app.post('/api/build', (req, res) => {
@@ -1605,8 +1614,24 @@ function pollJob() {
       job.exitAnnounced = true;
       console.log('  • the assistant exited before the ' + job.kind + ' run finished');
       broadcast({ type: 'agent-exited', kind: job.kind, id: job.id });
+      if (clients.size === 0) scheduleDeadRunCleanup(job);
     }
   });
+}
+// Nobody was connected to hear agent-exited: no page will ever send the job-stop, the
+// run can never finish, and the registered job would keep the server alive forever
+// (maybeShutdown / idleQuit wait on activeJob). After a grace period with still no
+// window, roll it back ourselves. A page that connects meanwhile gets the truth from
+// /api/status (job.exited) and decides instead.
+let deadRunTimer = null;
+function scheduleDeadRunCleanup(job) {
+  if (deadRunTimer) return;
+  deadRunTimer = setTimeout(() => {
+    deadRunTimer = null;
+    if (activeJob !== job || clients.size > 0) return;
+    console.log('  • no window to answer for the dead ' + job.kind + ' run — rolling it back');
+    stopJob(null, 'exited');
+  }, 30000);
 }
 
 // Kill the shared shell AND the assistant inside it (a user stop). The epoch bump
@@ -1665,7 +1690,7 @@ function stopJob(ws, reason) {
     const r = job ? rollbackJob(job) : { removed: [], restored: false };
     if (job) console.log('  • ' + job.kind + ' run stopped (' + reason + ')' +
       (r.removed.length ? ' — removed ' + r.removed.join(', ') : '') + (r.restored ? ' — digest restored' : ''));
-    const reply = () => sendTo(ws, { type: 'job-stopped', reason, removed: r.removed, restored: r.restored });
+    const reply = () => { if (ws) sendTo(ws, { type: 'job-stopped', reason, removed: r.removed, restored: r.restored }); };
     if (r.removed.length || r.restored) runBuild(reply); else reply();
   };
   // after a kill, give the process tree a moment to die so a write in flight is caught too
@@ -1701,6 +1726,10 @@ wss.on('connection', (ws) => {
   if (lastBuildError) {
     // the site on screen is stale — tell this page what went wrong at (re)build time
     try { ws.send(JSON.stringify({ type: 'build-error', error: lastBuildError })); } catch (e) {}
+  }
+  if (activeJob && activeJob.exitAnnounced) {
+    // the assistant died while no page was listening — this one hears it straight away
+    try { ws.send(JSON.stringify({ type: 'agent-exited', kind: activeJob.kind, id: activeJob.id })); } catch (e) {}
   }
 
   ws.on('message', (raw) => {
@@ -1770,6 +1799,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     clients.delete(ws);
     termSubs.delete(ws);   // detach this page; the shell keeps running for the next one
+    if (clients.size === 0 && activeJob && activeJob.exitAnnounced) scheduleDeadRunCleanup(activeJob);   // the last page left a dead run behind
     maybeShutdown();
   });
   ws.on('error', () => {});

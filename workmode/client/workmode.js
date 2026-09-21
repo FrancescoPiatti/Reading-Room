@@ -56,7 +56,7 @@
      up unread with the tutorial back. The server seeds every page from
      user/reading-state.json in <head> (window.RR_STATE); from here on every write
      to one of those keys goes back to it. localStorage stays the read path. */
-  var STATE_RE = /^rr-(?:status|prio|tags)-|^rr-(?:dismissed|theme)$/;
+  var STATE_RE = /^rr-(?:status|prio|tags)-|^rr-(?:dismissed|theme|sort)$|^rr-wm-(?:ai|ai-cfg|flow|sr)$/;
   (function syncReadingState(){
     var LS; try { LS = window.localStorage; } catch (e) { return; }
     if (!LS || typeof LS.setItem !== 'function') return;
@@ -254,6 +254,10 @@
   var dot = el('span', 'rr-wm-dot'); dot.title = 'shell connection';
   var hint = el('span', 'rr-wm-hint', '');
   var spacer = el('span', 'rr-wm-spacer');
+  // shown while a launched assistant is waiting on the reader (see makeBootWatch): once
+  // they have answered its prompt, this sends the flow command they asked for
+  var continueBtn = el('button', 'rr-wm-endchat rr-wm-continue', 'Continue — send the command'); continueBtn.type = 'button'; continueBtn.hidden = true;
+  continueBtn.title = 'Answer the assistant’s prompt in the terminal first, then press this to send the command';
   var endChatBtn = el('button', 'rr-wm-endchat', 'End chat'); endChatBtn.type = 'button';
   endChatBtn.title = 'Finish a /learn discussion — compact it and append it below the reading list';
   endChatBtn.hidden = true;                        // only shown while a /learn discussion is running
@@ -265,7 +269,8 @@
   var clearBtn = el('button', 'rr-wm-iconbtn', ICO_CLR); clearBtn.type = 'button'; clearBtn.title = 'Clear';
   var closeBtn = el('button', 'rr-wm-iconbtn', ICO_X); closeBtn.type = 'button'; closeBtn.title = 'Hide (Esc)';
   bar.appendChild(title); bar.appendChild(dot); bar.appendChild(hint); bar.appendChild(spacer);
-  bar.appendChild(endChatBtn); bar.appendChild(stopChatBtn); bar.appendChild(clearBtn); bar.appendChild(closeBtn);
+  bar.appendChild(continueBtn); bar.appendChild(endChatBtn); bar.appendChild(stopChatBtn); bar.appendChild(clearBtn); bar.appendChild(closeBtn);
+  continueBtn.addEventListener('click', function (){ if (bootWatch) bootWatch.force(); });
   var termWrap = el('div', 'rr-wm-term');
   drawer.appendChild(grip); drawer.appendChild(bar); drawer.appendChild(termWrap);
 
@@ -284,11 +289,12 @@
   var wantRespawn = false;                       // a launch needs a FRESH shell (see launchAgent)
   var afterFlush = null;                         // called once after a launch's input flushes (boot-wait arming)
   var pending = [];                              // input queued before the shell is ready (latest request wins)
+  var endChatQueued = false;                     // End chat pressed before the shell was attached
   // shared "hidden run" flow state (Analyze / Compare / Deep dive) — see the Flows section below
   var job = null;                                // the active hidden job, or null
   var runTick = null;                            // 1 s timer updating the run card's elapsed/last-line
   var jobStatusText = '';                        // last status line (re-shown if you reopen the overlay mid-run)
-  var activeArm = null;                          // current boot-wait controller (note() on shell output)
+  var bootWatch = null;                          // judges the launched assistant's first screens (see makeBootWatch)
   var flowOv = null;                             // the shared full-screen flow overlay
   var setupDoneAt = 0;                           // /setup finished at this time -> reload on the rebuild that follows (TTL'd)
   var lastPtyData = 0;                           // last time the shared pty produced output (job watchdog)
@@ -298,7 +304,6 @@
   var keepHintUntil = 0;                         // a deliberate stop's hint outlives the shell-exit hint that follows it
   var agentLive = false;                         // the CURRENT shell is running a live assistant (TUI seen after a launch)
   var launchedAi = null;                         // which assistant was launched into the current shell
-  var launchWatch = null;                        // { name, at, bytes } while a launch's first output is being judged
   var CLR = '\x15';                              // Ctrl+U: clear the input line before (re)typing, so an
                                                  // un-run pre-typed command never accumulates with the next
   var reconnectTimer = null, reconnectDelay = 1500;
@@ -327,7 +332,11 @@
     var FitCtor = (window.FitAddon && window.FitAddon.FitAddon) || window.FitAddon;
     if (FitCtor) { fit = new FitCtor(); term.loadAddon(fit); }
     term.open(termWrap);
-    term.onData(function (d){ send({ type: 'data', data: d }); });
+    term.onData(function (d){
+      send({ type: 'data', data: d });
+      // Enter typed while the assistant is asking something: they are answering it
+      if (bootWatch && bootWatch.needsYou && d.indexOf('\r') !== -1) bootWatch.answered = Date.now();
+    });
     // keep the xterm palette in sync with the page's light/dark toggle (only once a
     // terminal actually exists — pages that never open the drawer add no observer)
     new MutationObserver(function (){ if (term) term.options.theme = xtermTheme(); })
@@ -349,8 +358,7 @@
         lastPtyData = Date.now();
         if (job && job.started) noteOutput(m.data);     // run card: "still working, this is the last thing it said"
 
-        if (launchWatch) judgeLaunch(m.data);
-        if (activeArm && !activeArm.sent()) activeArm.note(m.data);
+        if (bootWatch) bootWatch.note(m.data);           // dialog? ready? (see makeBootWatch)
         // belt-and-braces: the assistant producing output IS the launch happening —
         // never leave a stale "launching X …" hint on screen past that point
         if (launchHint && spawned) { launchHint = false; if (hint.textContent.indexOf('launching') === 0) setHint(''); }
@@ -372,6 +380,7 @@
         everSpawned = true; reattached = false;
         while (pending.length) send({ type: 'data', data: pending.shift() });
         if (afterFlush) { var _f = afterFlush; afterFlush = null; try { _f(); } catch (e) {} } // arm the queued send after boot
+        if (endChatQueued) { endChatQueued = false; typeCommand('done'); }
       }
       else if (m.type === 'report-added' || m.type === 'report-changed' || m.type === 'compare-added' || m.type === 'chat-added') {
         jobOnBroadcast(m);                          // a hidden Analyze/Compare/Deep dive may be waiting for this
@@ -380,7 +389,7 @@
           if (!job) toast('Discussion saved — ' + m.slug, 'Open', function (){ location.href = '/chat/' + encodeURIComponent(m.slug) + '/'; });
         }
       }
-      else if (m.type === 'agent-exited') { agentLive = false; launchWatch = null; onAgentExited(); }   // the shell has had no child for a while: the assistant is gone
+      else if (m.type === 'agent-exited') { agentLive = false; if (bootWatch) bootWatch.cancel(); agentGone(); onAgentExited(); }   // the shell has had no child for a while: the assistant is gone
       else if (m.type === 'job-started') onJobStarted(m);    // the server registered our run: keep its ownership token
       else if (m.type === 'job-stopped') onJobStopped(m);    // the server finished rolling back a stopped run
       else if (m.type === 'update-progress') updProgress(m); // an update is being applied (pull / install / build)
@@ -409,18 +418,19 @@
         setHint('build error');
         // last non-empty line of scripts/build.py's stderr is the most useful one-liner
         var bline = String(m.error || '').split('\n').map(function(s){ return s.trim(); }).filter(Boolean).pop() || '';
-        toast('Build failed' + (bline ? ': ' + bline.slice(0, 160) : ' — see the app log (workmode/workmode.log)'));
+        if (job && job.resultId && job.poll) jobBuildFailed(bline);   // the run's own page failed to build
+        else toast('Build failed' + (bline ? ': ' + bline.slice(0, 160) : ' — see the app log (workmode/workmode.log)'));
       }
       else if (m.type === 'exit') {
         // a (re)spawn is in flight: this exit is the OLD shell's (we asked for it — e.g. a
         // Stop right before "Launch codex"); the queued launch must survive to the new
         // shell's 'ready', so don't reset the handshake or drop `pending` here
         if (awaitingReady) return;
-        agentLive = false; launchedAi = null; launchWatch = null;
+        agentLive = false; if (bootWatch) bootWatch.cancel(); agentGone(); launchedAi = null;
         if (Date.now() > keepHintUntil) setHint('shell exited — reopen to start a new one');
         spawned = false; awaitingReady = false; wantSpawn = false; pending = [];
         afterFlush = null;                       // a REAL exit (respawns are epoch-guarded server-side): a queued launch has no shell to land in
-        if (activeArm) { activeArm.cancel(); activeArm = null; }
+        if (bootWatch) bootWatch.cancel();
         if (job) jobOnExit();                    // a hidden run lost its shell → roll back, never leave the overlay spinning
         if (discuss) discussOnExit();            // a discussion lost its shell → nothing saved
         endChatBtn.hidden = true; stopChatBtn.hidden = true;
@@ -432,7 +442,7 @@
         if (term) term.write('\r\n\x1b[31m' + m.msg + '\x1b[0m\r\n');
         spawned = false; awaitingReady = false; wantRespawn = false; pending = []; afterFlush = null;
         setHint('terminal unavailable — run `npm install` in the app’s workmode/ folder');
-        if (activeArm) { activeArm.cancel(); activeArm = null; }
+        if (bootWatch) bootWatch.cancel();
         if (job) jobOnExit('The terminal isn’t available, so the assistant could not be started. Nothing was added to your library.');
         if (discuss) discussOnExit();
         endChatBtn.hidden = true; stopChatBtn.hidden = true;
@@ -467,6 +477,7 @@
   /* --------------------------------------------------------- drawer open/close */
   function isOpen(){ return drawer.classList.contains('rr-open'); }
   function openDrawer(){
+    if (bootWatch && bootWatch.needsYou) raiseDrawer();   // reopened while the assistant waits on the reader: stay on top
     if (isOpen()) return;
     drawer.classList.add('rr-open');
     document.body.classList.add('rr-wm-bodyopen');
@@ -482,7 +493,14 @@
     document.body.classList.remove('rr-wm-bodyopen');
     launch.classList.remove('rr-hidden');
     wantSpawn = false;            // don't re-spawn a hidden shell on reconnect while closed
+    lowerDrawer();
   }
+  // The drawer normally sits UNDER the flow overlays and the account modals. While the
+  // assistant is waiting on the reader (a trust prompt, a login) it must be on top of
+  // them — the reader has to see it to answer it — without closing whatever asked.
+  function raiseDrawer(){ document.body.classList.add('rr-term-front'); }
+  function lowerDrawer(){ document.body.classList.remove('rr-term-front'); }
+  function termHasFocus(){ var a = document.activeElement; return !!(a && termWrap.contains(a)); }
   function toggleDrawer(){ isOpen() ? closeDrawer() : openDrawer(); }
 
   closeBtn.addEventListener('click', closeDrawer);
@@ -490,14 +508,15 @@
   // End chat: tell a running /learn discussion to wrap up — it compacts the conversation
   // and appends it below the reading list (never a new paper/digest). Sends the "done" signal.
   endChatBtn.addEventListener('click', function (){
+    if (discuss && !discuss.started){ stopDiscussion(); return; }   // nothing to save yet: ending = stopping
     openDrawer();
     if (spawned && ws && ws.readyState === 1) typeCommand('done');   // two-phase: paste-swallowed Enter otherwise
-    else pending = ['done\r'];
+    else endChatQueued = true;                         // after 'ready' — never over the queued launch line
     endChatBtn.hidden = true;                          // the chat is wrapping up
     setHint('ending chat — the agent will compact it');
     if (term) term.focus();
   });
-  document.addEventListener('keydown', function (e){ if (e.key === 'Escape' && isOpen() && document.activeElement !== term && !(pdfOv && pdfOv.classList.contains('rr-show')) && !(notesOv && notesOv.classList.contains('rr-show')) && !(profOv && profOv.classList.contains('rr-show')) && !(flowOv && flowOv.classList.contains('rr-show'))) closeDrawer(); });
+  document.addEventListener('keydown', function (e){ if (e.key === 'Escape' && isOpen() && !termHasFocus() && !(pdfOv && pdfOv.classList.contains('rr-show')) && !(notesOv && notesOv.classList.contains('rr-show')) && !(profOv && profOv.classList.contains('rr-show')) && !(flowOv && flowOv.classList.contains('rr-show'))) closeDrawer(); });
 
   // pre-type a command (no Enter): user reviews + runs it, prompts preserved.
   // Clears the line first so switching commands (or to a launch) never accumulates
@@ -528,9 +547,13 @@
   // opts.headless: run the AI in the shared pty WITHOUT opening the drawer (the Analyze
   // flow watches the filesystem instead of the terminal). opts.then: called once, right
   // after the launch command flushes into the fresh shell (used to arm the analyze cmd).
+  // opts: headless (no drawer), raise (drawer above overlays/modals — Setup), cmd (the flow
+  // command to send once the assistant is READY, never into a dialog), onSent(wasNeedsYou),
+  // onNeedsYou(reason), onReady(), then() (legacy hint hook)
   function launchAgent(name, opts){
     opts = opts || {};
     if (!opts.headless) openDrawer();
+    if (opts.raise) raiseDrawer();
     endChatBtn.hidden = true;                          // a freshly launched agent has no /learn chat yet
     setHint('launching ' + name + ' …'); launchHint = true;
     pending = [aiCommand(name) + '\r'];               // latest action wins; no leftover pre-typed command
@@ -538,7 +561,9 @@
     // around forever on a plain ▾ launch); flows override this with their own step
     var thenCb = opts.then || function (){ setHint(''); };
     launchedAi = name; agentLive = false;
-    afterFlush = function (){ launchWatch = { name: name, at: Date.now(), bytes: 0 }; thenCb(); };   // judge the first output
+    if (bootWatch) bootWatch.cancel();
+    dispatchAgentState('starting', name, null);
+    afterFlush = function (){ bootWatch = makeBootWatch(name, opts); thenCb(); };   // judge the first screens
     if (ws && ws.readyState === 1 && !awaitingReady) {
       spawned = false; awaitingReady = true;
       send({ type: 'respawn', cols: term ? term.cols : 80, rows: term ? term.rows : 24 });
@@ -587,15 +612,32 @@
   // opens the Analyze overlay with the arXiv id already in the bar — never the terminal)
   window.RR_openAnalyze = function (input){ openAnalyze(input); };
   window.RR_openDiscuss = function (id){ openDiscuss(id); };
-  window.RR_launchAgent = function (name){ abandonRuns(); launchAgent(name); };   // Setup's "Launch claude/codex/gemini"
-  window.RR_openTerminal = function (){ openDrawer(); };           // Setup busy-box "Show terminal"
-  // Setup's Finish: auto-run cmd in the EXISTING shell, WITHOUT opening/raising the
-  // drawer. Returns true if it reached a live shell, false if none is running yet.
-  window.RR_submitCommand = function (cmd){
-    // only into a live assistant: typing /setup into a bare shell leaves the busy box spinning forever
-    if (spawned && agentLive && ws && ws.readyState === 1) { typeCommand(flowCommand(launchedAi || chosenAi(), cmd)); return true; }   // two-phase submit, in the LAUNCHED assistant's syntax
-    return false;
+  // Setup's "Launch claude/codex/gemini": a visible launch with the drawer RAISED above the
+  // Setup modal, which stays open behind it — the reader answers the assistant there and
+  // applies from the modal (it follows along through the rr-agent-state events)
+  window.RR_launchAgent = function (name){
+    if (job && job.started){ toast('A paper is being written right now — wait for it, or Stop it from its card, before launching an assistant'); return false; }
+    if (discuss && discuss.started){ toast('A discussion is running — End chat (or Stop it) before launching an assistant'); return false; }
+    abandonRuns(); launchAgent(name, { raise: true }); return true;
   };
+  window.RR_openTerminal = function (){ openDrawer(); };           // Setup busy-box "Show terminal"
+  // Setup's Apply: send cmd to the launched assistant. Only when it is READY (its prompt
+  // was seen) or in an unrecognised state the reader vouches for — never into a trust or
+  // login dialog, where the text would answer the dialog instead. Returns false otherwise;
+  // RR_agentState() says why.
+  window.RR_submitCommand = function (cmd){
+    if (!(spawned && launchedAi && ws && ws.readyState === 1)) return false;
+    var w = bootWatch;
+    if (!agentLive && !(w && w.needsYou === 'unknown')) return false;
+    if (w) w.cancel();
+    agentLive = true;
+    typeCommand(flowCommand(launchedAi, cmd));       // two-phase submit, in the LAUNCHED assistant's syntax
+    dispatchAgentState('sent', launchedAi, null);
+    lowerDrawer(); closeDrawer();                    // the busy box takes over ("Show terminal" brings it back)
+    return true;
+  };
+  window.RR_agentState = function (){ return { name: launchedAi, live: agentLive, needsYou: bootWatch ? bootWatch.needsYou : null }; };
+  window.RR_terminalHasFocus = termHasFocus;
 
   window.RR_dismissGhost = function (d){
     return fetch('/api/dismiss', {
@@ -656,7 +698,7 @@
   }
   window.RR_viewPdf = viewPdf;
   document.addEventListener('keydown', function (e){
-    if (e.key === 'Escape' && pdfOv && pdfOv.classList.contains('rr-show')) closePdf();
+    if (e.key === 'Escape' && pdfOv && pdfOv.classList.contains('rr-show') && !termHasFocus()) closePdf();
   });
 
   /* ---------------------------------------------- in-app notes editor overlay */
@@ -713,7 +755,7 @@
     document.body.classList.remove('rr-pdf-open');
   }
   document.addEventListener('keydown', function (e){
-    if (e.key === 'Escape' && notesOv && notesOv.classList.contains('rr-show')) closeNotes();
+    if (e.key === 'Escape' && notesOv && notesOv.classList.contains('rr-show') && !termHasFocus()) closeNotes();
   });
 
   /* ------------------------------------------ full-profile Markdown editor */
@@ -764,7 +806,7 @@
         var ai = chosenAi();
         abandonRuns();
         setHint('launching ' + ai + ' to review your profile …');
-        launchAgent(ai, { then: function (){ activeArm = armSend(flowCommand(ai, '/setup --review-profile'), function (){ setHint('the assistant is reviewing your profile — follow along here'); }); } });
+        launchAgent(ai, { cmd: flowCommand(ai, '/setup --review-profile'), onSent: function (){ setHint('the assistant is reviewing your profile — follow along here'); } });
         toast('Profile saved — ' + ai + ' is reviewing it in the terminal');
       });
     });
@@ -790,7 +832,7 @@
   }
   window.RR_editProfile = editProfile;             // the Profile modal's "Edit full profile"
   document.addEventListener('keydown', function (e){
-    if (e.key === 'Escape' && profOv && profOv.classList.contains('rr-show')) closeProfile();
+    if (e.key === 'Escape' && profOv && profOv.classList.contains('rr-show') && !termHasFocus()) closeProfile();
   });
 
   /* ================================= Flows ==================================
@@ -798,7 +840,7 @@
      run HIDDEN — the chosen assistant is launched in the shared pty, the command
      is sent once it's booted, and the FILESYSTEM (not the terminal) tells us when
      the result lands. Discuss is interactive by design, so it opens the visible
-     terminal instead. All share: the boot-wait send (armSend), the job runner, one
+     terminal instead. All share: the boot watcher (makeBootWatch), the job runner, one
      full-screen overlay, and the paper/assistant pickers. "Show terminal" reveals
      the same live session (for the assistant's own permission prompts). Nothing here
      uses the Anthropic API / `claude -p` — the interactive CLI is the only sanctioned
@@ -825,18 +867,156 @@
   // After a launch line is flushed, the first output tells whether an assistant is really
   // running: a "command not found" means it isn't installed (never type a flow command
   // into the bare shell); a TUI taking the screen (or a burst of output) means it is.
-  function judgeLaunch(chunk){
-    var w = launchWatch; if (!w) return;
-    w.bytes += (chunk || '').length;
-    if (/command not found|is not recognized as an internal|No such file or directory|not found: /i.test(chunk || '')){
-      launchWatch = null; agentLive = false;
-      setHint(w.name + ' is not installed here — install it, then launch again'); keepHintUntil = Date.now() + 8000;
-      toast(w.name + ' isn’t installed (or not on PATH) — see the install steps in the README');
-      return;
+  /* ---- boot watcher: what is the assistant showing? -------------------------
+     Whether the flow command may be sent is decided by the TEXT on screen, never by
+     byte counts or the alternate-screen switch alone. Real first screens (Sept 2026):
+       claude   trust: "Quick safety check … ❯ No, exit / Yes, I trust this folder" — NO
+                alternate screen and ~1.2 KB, so no byte/alt-screen heuristic fires on
+                it; typing a command + Enter there confirms "No, exit" and claude quits.
+                ready: alternate screen + "❯ Try …", "bypass permissions on", "? for shortcuts".
+       codex    trust: "Do you trust the contents of this directory? … Press enter to
+                continue" (codex never uses the alternate screen); ready: the banner
+                "OpenAI Codex (v…)", "permissions: …", "/model to change".
+       gemini   trust: a 10 KB box "Do you trust the files in this folder? … Trust folder
+                (…)" — big enough to trip a byte heuristic; ready: "Type your message or
+                @path/to/file", "? for shortcuts".
+     Plus logins ("Select login method", "Sign in with ChatGPT", "How would you like to
+     authenticate"), claude's bypass-permissions acceptance and theme picker. So:
+       a DIALOG signature → the reader is needed: the drawer is raised above whatever is
+         open, a Continue button appears (drawer bar + run card), the status says what
+         to do; readiness then counts only on output printed AFTER the dialog;
+       a READY signature (settled BOOT_SETTLE_MS) → the command is sent, hidden;
+       neither, for BOOT_CAP_MS → "unknown": raised drawer + Continue, and readiness
+         still auto-sends if it shows up later. Nothing is ever typed blind.
+     Text is compared with ALL whitespace removed and lower-cased: TUIs position words
+     with cursor moves, so "Quick safety check" arrives as "Quicksafetycheck". */
+  var DIALOG_RE = /quicksafetycheck|trustthisfolder|yes,itrust|bypasspermissionsmode|yes,iaccept|selectloginmethod|loginwith|pastecodehere|usetheurlbelow|choosethetextstyle|doyoutrustthecontents|yes,continue|signinwithchatgpt|codexlogin|doyoutrustthefiles|trustfolder\(|don'ttrust|howwouldyouliketoauthenticate|waitingforauthentication|pressentertocontinue|entertoconfirm/g;
+  var READY_RE = {
+    claude: /bypasspermissionson\(shift|\?forshortcuts|❯try"/,
+    codex:  /openaicodex\(v|permissions:|\/modeltochange/,
+    gemini: /typeyourmessage|\?forshortcuts/,
+  };
+  function flatText(x){
+    return String(x == null ? '' : x)
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')       // OSC
+      .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '')              // CSI
+      .replace(/\x1b[()][0-9A-Za-z]/g, '')
+      .replace(/[\s\x00-\x1f\x7f]+/g, '')
+      .toLowerCase();
+  }
+  function dialogReason(flat){
+    if (/trust|safetycheck/.test(flat)) return 'trust';
+    if (/login|signin|authenticat|pastecode|usetheurl/.test(flat)) return 'login';
+    return 'confirm';
+  }
+  // the drawer hint (short) and the run-card status (a full sentence) for a waiting assistant
+  function needsYouHint(name, reason){
+    if (reason === 'trust') return name + ' asks whether to trust this folder — choose Yes here';
+    if (reason === 'login') return name + ' wants you to log in — follow the steps here';
+    if (reason === 'confirm') return name + ' is asking you to confirm something — answer here';
+    return name + ' hasn’t shown its prompt yet — answer anything it asks, then Continue';
+  }
+  function needsYouStatus(name, reason){
+    if (reason === 'trust') return name + ' is asking whether to trust this folder. Choose “Yes” in the terminal below — it carries on by itself.';
+    if (reason === 'login') return name + ' wants you to log in. Follow the steps in the terminal below — it carries on once you’re in.';
+    if (reason === 'confirm') return name + ' is asking you to confirm something. Answer in the terminal below — it carries on by itself.';
+    return name + ' hasn’t shown its prompt yet. If it is asking you something, answer in the terminal below; when it is ready, press Continue.';
+  }
+  function dispatchAgentState(state, name, reason){
+    try { window.dispatchEvent(new CustomEvent('rr-agent-state', { detail: { state: state, name: name, reason: reason || null } })); } catch (e) {}
+  }
+  function agentGone(){ if (launchedAi) dispatchAgentState('gone', launchedAi, null); }
+  // Continue is offered only in the UNKNOWN state: while a recognised trust/login dialog is
+  // on screen the reader answers THAT, and the command goes out by itself when the prompt
+  // appears (or once they have pressed Enter and nothing we recognise followed)
+  function renderContinue(){ continueBtn.hidden = !(bootWatch && bootWatch.needsYou === 'unknown' && bootWatch.cmd); }
+  function lastMatchEnd(re, str){ var m, end = -1; re.lastIndex = 0; while ((m = re.exec(str)) !== null){ end = m.index + m[0].length; if (!m[0].length) re.lastIndex++; } re.lastIndex = 0; return end; }
+  function makeBootWatch(name, opts){
+    opts = opts || {};
+    var w = { name: name, cmd: opts.cmd || null, t0: Date.now(), text: '', dialogAt: -1, lastDialogAt: 0, needsYou: null, readyAt: 0, answered: 0, sent: false, done: false, iv: null };
+    function finish(){ w.done = true; clearInterval(w.iv); if (bootWatch === w) bootWatch = null; renderContinue(); }
+    function sendNow(){
+      if (w.sent || w.done) return;
+      w.sent = true; agentLive = true;
+      var was = w.needsYou; w.needsYou = null;
+      if (w.cmd) typeCommand(w.cmd);
+      finish();
+      dispatchAgentState('sent', name, null);
+      if (opts.onSent) opts.onSent(was);
     }
-    if ((chunk && chunk.indexOf('\x1b[?1049h') !== -1) || w.bytes >= BOOT_BURST_BYTES || Date.now() - w.at > 8000){
-      launchWatch = null; agentLive = true;
+    function needsYou(reason){
+      w.needsYou = reason; w.answered = 0; agentLive = false;
+      raiseDrawer(); openDrawer(); if (term) term.focus();
+      renderContinue();
+      setHint(needsYouHint(name, reason)); keepHintUntil = Date.now() + 60000;
+      dispatchAgentState('needs-you', name, reason);
+      if (opts.onNeedsYou) opts.onNeedsYou(reason);
     }
+    w.note = function (chunk){
+      if (w.done) return;
+      var raw = String(chunk == null ? '' : chunk);
+      if (/command not found|is not recognized as an internal|No such file or directory|not found: /i.test(raw)){
+        finish(); agentLive = false;
+        setHint(name + ' is not installed here — install it, then launch again'); keepHintUntil = Date.now() + 8000;
+        toast(name + ' isn’t installed (or not on PATH) — see the install steps in the README');
+        dispatchAgentState('gone', name, 'missing');
+        if (opts.onFail) opts.onFail('missing');
+        return;
+      }
+      var flat = flatText(raw);
+      var probe = w.text.slice(-80) + flat;              // a signature can straddle two chunks
+      w.text = (w.text + flat).slice(-8000);
+      var dEnd = lastMatchEnd(DIALOG_RE, probe);
+      if (dEnd !== -1){
+        w.lastDialogAt = Date.now(); w.readyAt = 0;
+        w.dialogAt = w.text.length - (probe.length - dEnd);   // readiness counts only after this
+        var reason = dialogReason(probe.slice(Math.max(0, dEnd - 60), dEnd));
+        if (w.needsYou !== reason) needsYou(reason);
+        // the same chunk may already hold the NEXT screen (codex answers Enter inline)
+        probe = probe.slice(dEnd);
+      }
+      var fresh = w.dialogAt >= 0 ? w.text.slice(w.dialogAt) : w.text;
+      var ready = (READY_RE[name] && (READY_RE[name].test(fresh) || READY_RE[name].test(probe)))
+               || (name === 'claude' && dEnd === -1 && raw.indexOf('\x1b[?1049h') !== -1);
+      if (ready && !w.readyAt){
+        w.readyAt = Date.now(); agentLive = true;
+        if (w.needsYou) setHint(name + ' is ready — sending the command …');
+        dispatchAgentState('ready', name, null);
+        if (opts.onReady) opts.onReady();
+      }
+    };
+    w.force = sendNow;                                  // the Continue button
+    w.cancel = function (){ w.needsYou = null; finish(); };
+    var childPollAt = 0, emptyPolls = 0, polling = false;
+    function pollChildren(){
+      if (polling) return; polling = true;
+      fetch('/api/term-children').then(function (r){ return r.json(); }).then(function (j){
+        polling = false;
+        if (w.done || !j || typeof j.children !== 'number') return;
+        emptyPolls = j.children === 0 ? emptyPolls + 1 : 0;
+        if (emptyPolls >= 2){
+          finish(); agentLive = false;
+          setHint(name + ' closed before the command could be sent'); keepHintUntil = Date.now() + 8000;
+          dispatchAgentState('gone', name, 'exited');
+          if (opts.onFail) opts.onFail('exited');
+        }
+      }).catch(function (){ polling = false; });
+    }
+    w.iv = setInterval(function (){
+      if (w.done) return;
+      var now = Date.now();
+      // waiting on the reader (or on the screen after a dialog): is the assistant still there?
+      if ((w.needsYou || w.dialogAt >= 0) && !w.readyAt && now - childPollAt >= 3000){ childPollAt = now; pollChildren(); }
+      if (w.readyAt){
+        if (now - w.readyAt >= BOOT_SETTLE_MS){ if (w.cmd) sendNow(); else finish(); }
+        return;
+      }
+      // they pressed Enter on a dialog, nothing new was asked, and no prompt we recognise
+      // has appeared: hand over a Continue rather than guessing
+      if (w.needsYou && w.needsYou !== 'unknown' && w.answered && now - w.answered > 2500 && now - w.lastDialogAt > 2500) needsYou('unknown');
+      if (!w.needsYou && now - w.t0 >= BOOT_CAP_MS) needsYou('unknown');
+    }, 200);
+    return w;
   }
   // run cb once the socket is connected and idle (no spawn handshake in flight), so
   // launchAgent takes the direct-respawn path even if a flow is started right at load.
@@ -860,34 +1040,6 @@
     setTimeout(function (){ send({ type: 'data', data: '\r' }); }, 400);
     setTimeout(function (){ send({ type: 'data', data: '\r' }); }, 1300);
   }
-  // Send a command once the assistant's TUI is actually LIVE (see the constants
-  // above for why quiet-detection is wrong here). Returns a controller: note(chunk)
-  // on each pty output chunk, sent() to check, cancel() to abort. `activeArm`
-  // points at the live one so the ws 'data' handler can feed it.
-  function armSend(cmd, onSent){
-    var t0 = Date.now(), tuiAt = 0, bytes = 0, done = false, iv;
-    iv = setInterval(function (){
-      if (done){ clearInterval(iv); return; }
-      var now = Date.now();
-      if ((tuiAt && now - tuiAt >= BOOT_SETTLE_MS) || now - t0 >= BOOT_CAP_MS){
-        done = true; clearInterval(iv);
-        typeCommand(cmd);
-        if (onSent) onSent();
-      }
-    }, 200);
-    return {
-      note: function (chunk){
-        if (done || tuiAt) return;
-        bytes += (chunk || '').length;
-        // the TUI taking over the screen is the readiness signal: alternate-screen
-        // switch, or a redraw burst far bigger than a shell echo
-        if ((chunk && chunk.indexOf('\x1b[?1049h') !== -1) || bytes >= BOOT_BURST_BYTES) tuiAt = Date.now();
-      },
-      sent: function (){ return done; },
-      cancel: function (){ done = true; clearInterval(iv); },
-    };
-  }
-
   /* ---- job runner: launch → arm → watch a broadcast → verify → done ---- */
   // spec: { kind, id?, ai, title, cmd, working, building, watch(msg)->id|null, verify(id)->truthy|url,
   //         openUrl(id), openLabel, doneText(id), doneToast(id), again, againLabel }
@@ -920,45 +1072,47 @@
   }
   var JOB_QUIET_WARN_MS = 90000;   // pty silent this long mid-job -> the assistant is probably waiting
   var stopping = null;             // { spec, text, timer } between job-stop and the server's job-stopped
-  // has this assistant ever been launched by the app on this install? Its first start
-  // in a folder typically shows a "trust this folder?" / login / onboarding dialog —
-  // typing the flow command into that would answer the dialog instead of running.
-  function aiKey(name){ return 'rr-ai-ready:' + name + '@' + WM.root + ':' + (WM.dir || ''); }   // per install AND per folder path
-  function aiSeen(name){ return lsGet(aiKey(name), '') === '1'; }
-  function markAiSeen(name){ lsSet(aiKey(name), '1'); }
   function runJob(spec){
     if (discuss) stopDiscussion();                    // one shared pty: a discussion can't survive the respawn
-    job = { spec: spec, resultId: null, poll: null, sentAt: 0, warned: false, dog: null, started: false, token: null, wait: null };
+    job = { spec: spec, resultId: null, poll: null, sentAt: 0, warned: false, dog: null, started: false, token: null, wait: null, needsYou: null };
     stopping = null;
     showFlowRun(spec.title);
     setJobStatus('Starting ' + spec.ai + ' …');
     ensureTerm();
-    var me = job, first = !aiSeen(spec.ai);
-    function submitted(){                             // the flow command is in the assistant's composer
+    var me = job;
+    function submitted(wasNeedsYou){                  // the flow command is in the assistant's composer
       if (!job || job.spec !== spec) return;          // stopped/replaced while booting
-      job.started = true; markAiSeen(spec.ai);
+      job.started = true; job.needsYou = null;
       var start = { type: 'job-start', kind: spec.kind }; if (spec.id) start.id = spec.id;
       send(start);                                    // server: snapshot the library for a rollback
       setJobStatus(spec.working);
       job.sentAt = Date.now(); job.dog = setInterval(jobWatchdog, 5000);
-      if (first) closeDrawer();
+      lowerDrawer();
+      if (wasNeedsYou) closeDrawer();                 // the reader's part is done — back to a hidden run
+      if (flowOv && flowOv.classList.contains('rr-show')) renderRun(flowOv._card);   // drops the Continue button
     }
     me.wait = whenTermReady(function (){
       if (job !== me) return;                         // stopped/replaced while the socket was coming up
-      if (first){
-        // visible launch + a Continue button: the reader answers any first-run dialog
-        // (trust the folder, log in), then the command is sent on their say-so
-        launchAgent(spec.ai, { then: function (){ setHint('first launch of ' + spec.ai + ' here — answer its prompts, then press Continue'); } });
-        setJobStatus('First launch of ' + spec.ai + ' in this app. If it asks you to trust this folder or to log in, answer in the terminal below — then press Continue.');
-        renderRun(flowOv._card, false, { label: 'Continue', run: function (){
+      // hidden launch; the watcher sends the command once the assistant's prompt is on
+      // screen. A trust/login dialog instead → needs-you: the drawer comes up ABOVE this
+      // overlay (body.rr-term-front) so the reader can answer it, the card explains and
+      // offers Continue, and Show terminal no longer has to close the overlay.
+      launchAgent(spec.ai, {
+        headless: true, cmd: flowCommand(spec.ai, spec.cmd), onSent: submitted,
+        onNeedsYou: function (reason){
           if (job !== me) return;
-          typeCommand(flowCommand(spec.ai, spec.cmd)); submitted();
-        } });
-        return;
-      }
-      launchAgent(spec.ai, { headless: true, then: function (){
-        activeArm = armSend(flowCommand(spec.ai, spec.cmd), submitted);
-      } });
+          job.needsYou = reason;
+          setJobStatus(needsYouStatus(spec.ai, reason));
+          if (flowOv && flowOv.classList.contains('rr-show')) renderRun(flowOv._card);
+        },
+        onReady: function (){ if (job === me && job.needsYou) setJobStatus(spec.ai + ' is ready — sending the command …'); },
+        onFail: function (why){
+          if (job !== me) return;
+          stopJob('exited', why === 'exited'
+            ? spec.ai + ' closed before the command could be sent (did it get “No, exit”?). Try again and answer its prompt — nothing was added to your library.'
+            : spec.ai + ' isn’t installed here (or isn’t on the shell’s PATH). Install it — the README has the steps — then try again. Nothing was added to your library.');
+        },
+      });
     }, function (){
       if (job === me) stopJob('exited', 'Could not reach the app’s terminal — check that Reading Room is running, then try again. Nothing was added to your library.');
     });
@@ -995,15 +1149,29 @@
       tries++;
       Promise.resolve(job.spec.verify(id)).then(function (res){
         if (res){ clearInterval(job.poll); jobDone(id, typeof res === 'string' ? res : job.spec.openUrl(id)); }
-        else if (tries > 240){ clearInterval(job.poll); jobDone(id, job.spec.openUrl(id)); } // give up waiting; offer anyway
+        else if (tries > 240){ jobBuildFailed(''); }                       // the page never appeared: say so, don't claim success
       }).catch(function (){ if (tries > 240) clearInterval(job.poll); });
     }, 1000);
+  }
+  // the assistant wrote its file but the site did not build (a schema slip, a tag outside
+  // the vocabulary …): the file is kept, the card says what happened instead of "Added"
+  function jobBuildFailed(bline){
+    var j = job, sp = j ? j.spec : null;
+    if (!j) return;
+    if (j.poll) clearInterval(j.poll);
+    if (j.dog) clearInterval(j.dog);
+    if (bootWatch) bootWatch.cancel();
+    job = null;
+    if (j.started) send({ type: 'job-end', token: j.token });      // the write is done; nothing to roll back
+    var text = 'The assistant finished writing, but the page could not be built' + (bline ? ' — ' + bline.slice(0, 200) : '')
+      + '. Its file is kept: ask your assistant to run /verify-build (or check workmode/workmode.log), then rebuild.';
+    if (flowOv && flowOv.classList.contains('rr-show')) showFlowStopped(sp, text); else toast(text);
   }
   function jobDone(id, url){
     var j = job, sp = j ? j.spec : null;
     if (j && j.poll) clearInterval(j.poll);
     if (j && j.dog) clearInterval(j.dog);
-    if (activeArm){ activeArm.cancel(); activeArm = null; }
+    if (bootWatch) bootWatch.cancel();
     job = null;
     if (!sp) return;
     if (j.started) send({ type: 'job-end', token: j.token });      // result verified → the server drops its snapshot
@@ -1024,8 +1192,9 @@
     if (j.poll) clearInterval(j.poll);
     if (j.dog) clearInterval(j.dog);
     if (j.wait) j.wait();                         // a launch still waiting for the socket must never fire now
-    if (activeArm){ activeArm.cancel(); activeArm = null; }
+    if (bootWatch) bootWatch.cancel();
     afterFlush = null;                            // never let the flow command land in a later shell
+    lowerDrawer();
     text = text || 'Stopped — nothing was added to your library.';
     if (!j.started){
       // no token = "kill the booting assistant only": the server rolls back nothing
@@ -1038,8 +1207,10 @@
     setJobStatus(reason === 'user' ? 'Stopping…' : 'Cleaning up…');
     if (flowOv && flowOv.classList.contains('rr-show')) renderRun(flowOv._card, true);
     // the token proves this page owns the registered run — without it the server only
-    // kills the shell and rolls back nothing (job-start's reply may still be in flight)
-    withToken(j, function (token){ send({ type: 'job-stop', reason: reason, token: token }); });
+    // kills the shell and rolls back nothing (job-start's reply may still be in flight).
+    // A page that adopted the run at load may not have its socket open yet: wait for it
+    // (send() drops silently otherwise and only the 20 s belt below would end the card).
+    whenTermReady(function (){ withToken(j, function (token){ send({ type: 'job-stop', reason: reason, token: token }); }); }, function (){});
     // belt: a dropped socket never answers — don't leave the overlay on "Stopping…" forever
     stopping.timer = setTimeout(function (){ onJobStopped({ type: 'job-stopped', removed: [], restored: false }); }, 20000);
   }
@@ -1061,6 +1232,8 @@
   function abandonRuns(){
     if (job) stopJob('user');
     if (discuss) stopDiscussion();
+    if (bootWatch) bootWatch.cancel();            // a plain launch still being judged
+    lowerDrawer();
   }
   function onJobStopped(m){
     if (!stopping) return;
@@ -1268,12 +1441,13 @@
     document.addEventListener('keydown', function (e){
       if (!current) return;
       if (e.key === 'Tab'){
+        if (termHasFocus()) return;                  // the raised terminal is its own focus world
         var f = focusables(current);
         if (!f.length) return;
         var first = f[0], last = f[f.length - 1], a = document.activeElement;
         if (e.shiftKey && (a === first || !current.contains(a))) { e.preventDefault(); last.focus(); }
         else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
-      } else if (e.key === 'Escape' && current.classList.contains('rr-analyze-overlay')){
+      } else if (e.key === 'Escape' && current.classList.contains('rr-analyze-overlay') && !termHasFocus()){
         // the PDF/notes/profile panels close themselves on Esc already; the flow and
         // diagnostics panels close through the Back button in their bar
         var back = current.querySelector('.rr-pdf-bar .rr-wm-btn');
@@ -1298,7 +1472,10 @@
     flowOv.appendChild(bar); flowOv.appendChild(body);
     document.body.appendChild(flowOv);
     back.addEventListener('click', closeFlow);
-    showTerm.addEventListener('click', function (){ closeFlow(); openDrawer(); });   // watch/step in on the same live session
+    showTerm.addEventListener('click', function (){
+      if (job && job.needsYou){ openDrawer(); return; }   // the drawer comes up raised, on top of this card — Continue stays reachable
+      closeFlow(); openDrawer();                          // watch/step in on the same live session
+    });
     flowOv._title = title; flowOv._showTerm = showTerm; flowOv._card = card;
     return flowOv;
   }
@@ -1315,7 +1492,10 @@
     var st = el('div', 'rr-analyze-status'); st.textContent = jobStatusText || 'Starting…';
     st.setAttribute('role', 'status'); st.setAttribute('aria-live', 'polite');
     run.appendChild(st);
-    if (extra){                                      // e.g. the first-launch "Continue"
+    // a waiting assistant (trust / login / unknown) → Continue, from the job's own state so a
+    // re-render (reopening the flow, adopting) never loses it
+    if (!extra && job && job.needsYou === 'unknown' && bootWatch && bootWatch.cmd) extra = { label: 'Continue', run: function (){ if (bootWatch) bootWatch.force(); } };
+    if (extra){
       var ex = el('div', 'rr-analyze-actions rr-analyze-actions--center');
       var go = el('button', 'rr-wm-btn rr-wm-primary', ICO_BOT + '<span>' + esc(extra.label) + '</span>'); go.type = 'button';
       go.addEventListener('click', function (){ go.disabled = true; extra.run(); });
@@ -1402,9 +1582,30 @@
   }
   // open a flow's form — but if a hidden job is already running, reopen to ITS status
   // (you can't start a second hidden run; that would respawn and kill the first).
+  // a Discussion is a live conversation in the terminal: no other flow may start over it
+  // unnoticed — the reader ends it (saved) or stops it (discarded) first
+  function renderDiscussRunning(card){
+    card.innerHTML = '';
+    var box = el('div', 'rr-analyze-run');
+    box.appendChild(el('div', 'rr-analyze-spinner'));
+    var st = el('div', 'rr-analyze-status'); st.textContent = 'A discussion is running in the terminal' + (discuss && discuss.id ? (' about ' + discuss.id) : '') + '. End it to save it as a Discussion, or stop it — then start this.';
+    box.appendChild(st);
+    var actions = el('div', 'rr-analyze-actions rr-analyze-actions--center');
+    var show = el('button', 'rr-wm-btn rr-wm-primary', ICO_TERM + '<span>Show terminal</span>'); show.type = 'button';
+    show.addEventListener('click', function (){ closeFlow(); openDrawer(); });
+    var end = el('button', 'rr-wm-btn', ICO_LEARN + '<span>End chat (save)</span>'); end.type = 'button';
+    end.disabled = !(discuss && discuss.started);
+    end.addEventListener('click', function (){ closeFlow(); endChatBtn.click(); });
+    var stop = el('button', 'rr-wm-btn rr-wm-danger-ghost', ICO_X + '<span>Stop discussion</span>'); stop.type = 'button';
+    stop.addEventListener('click', function (){ stopDiscussion(); closeFlow(); });
+    actions.appendChild(show); actions.appendChild(end); actions.appendChild(stop);
+    box.appendChild(actions); card.appendChild(box);
+    flowOv._status = null;
+  }
   function openFlow(title, renderForm){
     buildFlowOverlay();
     if (job){ flowOv._title.textContent = job.spec.title; flowOv._showTerm.hidden = false; renderRun(flowOv._card); }
+    else if (discuss){ flowOv._title.textContent = title; flowOv._showTerm.hidden = true; renderDiscussRunning(flowOv._card); }
     else if (stopping){ flowOv._title.textContent = stopping.spec.title; flowOv._showTerm.hidden = false; renderRun(flowOv._card, true); }
     else { flowOv._title.textContent = title; flowOv._showTerm.hidden = true; flowOv._card.innerHTML = ''; renderForm(flowOv._card); }
     flowOv.classList.add('rr-show'); document.body.classList.add('rr-pdf-open');
@@ -1949,14 +2150,21 @@
     if (job) stopJob('user');                                   // one shared pty: a hidden run can't survive the respawn
     discuss = { id: id, started: false };
     // visible (not headless): openDrawer, launch the assistant, send /learn after boot
-    launchAgent(ai, { then: function (){ activeArm = armSend(flowCommand(ai, cmd), function (){
-      if (!discuss || discuss.id !== id) return;
-      discuss.started = true; markAiSeen(ai);
-      send({ type: 'job-start', kind: 'discuss', id: id });    // server: snapshot chats/ for a rollback
-      setHint('discussion started — ask away, then End chat to save');
-    }); } });
-    // AFTER launchAgent (it hides End chat for a plain launch): a /learn discussion is now running
-    endChatBtn.hidden = false; stopChatBtn.hidden = false;
+    launchAgent(ai, {
+      cmd: flowCommand(ai, cmd),
+      onSent: function (){
+        if (!discuss || discuss.id !== id) return;
+        discuss.started = true; endChatBtn.hidden = false;
+        send({ type: 'job-start', kind: 'discuss', id: id });    // server: snapshot chats/ for a rollback
+        setHint('discussion started — ask away, then End chat to save');
+      },
+      // a first-launch dialog: the drawer is already open; the bar shows why (and Continue if unsure)
+      onNeedsYou: function (reason){ if (discuss && discuss.id === id) toast(needsYouStatus(ai, reason)); },
+      onFail: function (why){ if (discuss && discuss.id === id) discussOnExit(why === 'exited' ? ai + ' closed before the discussion could start — try again and answer its prompt.' : ai + ' isn’t installed here (or isn’t on the shell’s PATH) — the README has the install steps.'); },
+    });
+    // AFTER launchAgent (it hides End chat for a plain launch): Stop is available at once,
+    // End chat once the /learn command has actually gone out (onSent)
+    endChatBtn.hidden = true; stopChatBtn.hidden = false;
     setHint('discussing — ask questions, then End chat to save');
   }
   // the running discussion was compacted (chat-added): the server can drop its snapshot
@@ -1969,7 +2177,7 @@
   function discussOnExit(text){
     if (!discuss) return;
     var d = discuss; discuss = null;
-    if (activeArm){ activeArm.cancel(); activeArm = null; }
+    if (bootWatch) bootWatch.cancel();
     afterFlush = null;
     endChatBtn.hidden = true; stopChatBtn.hidden = true;
     if (d.started) withToken(d, function (token){ send({ type: 'job-stop', reason: 'exited', token: token }); });   // roll back a half-written chat
@@ -1980,7 +2188,7 @@
   function stopDiscussion(){
     if (!discuss){ stopChatBtn.hidden = true; return; }
     var d = discuss; discuss = null;
-    if (activeArm){ activeArm.cancel(); activeArm = null; }
+    if (bootWatch) bootWatch.cancel();
     afterFlush = null;
     endChatBtn.hidden = true; stopChatBtn.hidden = true;
     // started → prove ownership with the token (rollback of the half-written chat);
@@ -1994,7 +2202,7 @@
 
   function noteEl(html){ var n = el('div', 'rr-analyze-note'); n.innerHTML = html; return n; }
 
-  document.addEventListener('keydown', function (e){ if (e.key === 'Escape' && flowOv && flowOv.classList.contains('rr-show')) closeFlow(); });
+  document.addEventListener('keydown', function (e){ if (e.key === 'Escape' && flowOv && flowOv.classList.contains('rr-show') && !termHasFocus()) closeFlow(); });
 
   /* ================================ Updates =================================
      git-based, no API: the server fetches origin and reports what's new; applying
@@ -2212,7 +2420,7 @@
     var ai = chosenAi();
     setHint('launching ' + ai + ' to run /update …');
     abandonRuns();                                   // a hidden run or discussion can't survive the respawn
-    launchAgent(ai, { then: function (){ activeArm = armSend(flowCommand(ai, '/update'), function (){ setHint('/update is running — follow along here'); }); } });
+    launchAgent(ai, { cmd: flowCommand(ai, '/update'), onSent: function (){ setHint('/update is running — follow along here'); } });
   }
   // avatar menu "Updates" (force → refresh=1 re-fetches origin)
   window.RR_openUpdates = function (force){
@@ -2301,6 +2509,7 @@
       discuss = { id: id, started: true, token: sj.token };
       endChatBtn.hidden = false; stopChatBtn.hidden = false;
       setHint('a discussion is running — End chat saves it, Stop discussion discards it');
+      toast('A discussion is still running' + (id ? (' about ' + id) : ''), 'Show terminal', function (){ openDrawer(); });   // the drawer never opens itself
       return;
     }
     var spec = null;
@@ -2331,7 +2540,11 @@
     if (!spec) return;
     jobStatusText = spec.working;
     // no watchdog: this page isn't attached to the pty (no output to measure quiet against)
-    job = { spec: spec, resultId: null, poll: null, sentAt: Date.now(), warned: false, dog: null, started: true, token: sj.token, wait: null, adopted: true };
+    var since = Date.parse(sj.startedAt || '') || Date.now();     // the run's real start, not this page load
+    job = { spec: spec, resultId: null, poll: null, sentAt: since, warned: false, dog: null, started: true, token: sj.token, wait: null, adopted: true };
+    // the server already saw the assistant quit (nobody was connected to hear it): end the
+    // run now with the truth instead of adopting a spinner that can never finish
+    if (sj.exited) stopJob('exited', 'The assistant that was writing this had already quit before this page opened. Nothing was added to your library.');
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', updAutoCheck); else updAutoCheck();
   // The terminal drawer NEVER opens itself — not on page load, not on navigation.

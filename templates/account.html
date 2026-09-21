@@ -44,6 +44,11 @@
 .rr-bk-sub:empty { display: none; }
 .rr-bk-custom { margin-top: 8px; font-family: var(--mono); font-size: 13px; }
 .rr-bk-auto { display: flex; align-items: center; gap: 10px; padding: 7px 10px; font-size: 13.5px; }
+.rr-setup-agent { margin-top: 12px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-raised); font-size: 13.5px; line-height: 1.5; color: var(--ink); }
+.rr-setup-agent--needs-you { border-color: var(--accent); }
+.rr-setup-agent--ready { border-color: var(--accent); color: var(--ink); }
+.rr-setup-agent--gone { color: var(--rr-danger); }
+.rr-setup-agent[hidden] { display: none; }
 .rr-bk-select { width: auto; min-width: 140px; padding: 6px 10px; font-size: 13px; font-family: var(--mono); }
 .rr-bk-custom[hidden] { display: none; }
 .rr-bk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
@@ -99,8 +104,8 @@
         <button type="button" class="rr-btn rr-btn-ghost" data-rr-agent="claude">Launch claude</button>
         <button type="button" class="rr-btn rr-btn-ghost" data-rr-agent="codex">Launch codex</button>
         <button type="button" class="rr-btn rr-btn-ghost" data-rr-agent="gemini">Launch gemini</button>
+        <button type="button" class="rr-btn rr-btn-go" id="rr-setup-finish" hidden>Finish</button>
       </span>
-      <button type="button" class="rr-btn rr-btn-go" id="rr-setup-finish" hidden>Finish</button>
     </div>
   </div>
 </div>
@@ -211,17 +216,10 @@
     <div class="rr-setup-busy-msg" id="rr-setup-busy-msg">Setting up your {{SITE_TITLE}}…</div>
     <div class="rr-setup-busy-sub" id="rr-setup-busy-sub">The assistant is applying your answers — this takes a minute.</div>
     <button type="button" class="rr-btn rr-btn-ghost rr-setup-busy-term" id="rr-setup-busy-term">Show terminal</button>
+    <button type="button" class="rr-btn rr-btn-ghost rr-setup-busy-term" id="rr-setup-busy-close">Close</button>
   </div>
 </div>
 
-<!-- Non-blocking "apply setup" bar. After launching an AI we CLOSE the Setup modal
-     (so its blurred backdrop doesn't cover the terminal — a first-run login needs to be
-     typed into it); this small bar then lets you apply your setup once the agent is up. -->
-<div class="rr-setup-finishbar" id="rr-setup-finishbar" hidden>
-  <span class="rr-sfb-msg" id="rr-sfb-msg"></span>
-  <button type="button" class="rr-btn rr-btn-go" id="rr-sfb-apply">Apply setup</button>
-  <button type="button" class="rr-btn rr-btn-ghost" id="rr-sfb-dismiss">Dismiss</button>
-</div>
 
 <script>
 /* Account menu + Profile/Setup/Back up/Tutorial modals. Self-contained IIFE; reads the
@@ -300,10 +298,18 @@
   }
   // backdrop / × / [data-rr-close] close their modal; Esc closes the open one
   [profileModal, setupModal, backupModal, tutorialModal].forEach(function (m){
-    m.addEventListener('click', function (e){ if (e.target.hasAttribute('data-rr-close')) closeModal(m); });
+    m.addEventListener('click', function (e){
+      if (!e.target.hasAttribute('data-rr-close')) return;
+      if (e.target.classList.contains('rr-modal-backdrop') && document.body.classList.contains('rr-term-front')) return;   // the terminal is up for this modal: a stray click is not a close
+      closeModal(m);
+    });
   });
+  function inTerminal(){ return typeof window.RR_terminalHasFocus === 'function' && window.RR_terminalHasFocus(); }
   document.addEventListener('keydown', function (e){
     if (e.key !== 'Escape') return;
+    if (inTerminal()) return;                        // Esc inside the terminal belongs to the assistant (Claude uses it to interrupt)
+    var t = e.target;
+    if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && t.closest('#rr-setup-modal')) { t.blur(); return; }   // in a Setup field: leave the field, keep the answers
     var open = document.querySelector('.rr-modal:not([hidden])');
     if (open) closeModal(open);
   });
@@ -311,6 +317,7 @@
   // to the (blurred, inert-looking) page underneath
   document.addEventListener('keydown', function (e){
     if (e.key !== 'Tab') return;
+    if (inTerminal()) return;                        // the raised terminal is its own focus world
     var open = document.querySelector('.rr-modal:not([hidden])');
     if (!open) return;
     var els = Array.prototype.filter.call(
@@ -657,7 +664,14 @@
   }
 
   var autoOpenTimer = null;
-  function openSetup(){ if (autoOpenTimer) { clearTimeout(autoOpenTimer); autoOpenTimer = null; } hideFinishBar(); pendingProf = null; ans = seed(); idx = 0; tagsTouched = false; renderStep(); openModal(setupModal); }
+  function openSetup(){
+    if (autoOpenTimer) { clearTimeout(autoOpenTimer); autoOpenTimer = null; }
+    // closed part-way (× or Esc), or an assistant was launched from the last step: pick up
+    // where it was — eleven answers are not something to retype
+    var resume = ans && idx > 0 && !(launchedState === 'gone');
+    if (!resume) { ans = seed(); idx = 0; tagsTouched = false; }
+    renderStep(); openModal(setupModal);
+  }
 
   function renderStep(){
     var last = idx === STEPS.length - 1;
@@ -695,8 +709,12 @@
     }
     // on the last step, the Launch AI (Claude/Codex/Gemini) buttons appear in the footer — you
     // must launch one for Finish to apply (it runs /setup in that terminal).
-    if (last) html += '<p class="rr-q-note"><b>Launch an AI (Claude, Codex, or Gemini)</b> below — this opens the terminal (log in there if it’s your first run), then an <b>Apply setup</b> bar runs <code>/setup</code> to write your profile.</p>';
+    if (last) {
+      html = '<div class="rr-setup-agent" id="rr-setup-agent" hidden></div>' + html
+        + '<p class="rr-q-note"><b>Launch an AI (Claude, Codex, or Gemini)</b> below. The terminal opens on top of this window — if it asks you to trust this folder or to log in, answer there. Then press <b>Apply setup</b> (close the terminal or leave it open): it runs <code>/setup</code> to write your profile.</p>';
+    }
     bodyEl.innerHTML = html;
+    if (last && launchedName) showLaunchState(launchedState, launchedName, launchedReason);   // reopened after a launch: keep showing where the assistant is
     stepEl.textContent = 'Step ' + (idx + 1) + ' of ' + STEPS.length;
     barEl.style.width = Math.round(((idx + 1) / STEPS.length) * 100) + '%';
     // renderStep is authoritative for the whole footer, so reopening Setup after the
@@ -704,6 +722,7 @@
     backBtn.hidden = false; backBtn.disabled = idx === 0;
     nextBtn.hidden = last;
     finishBtn.hidden = !last; finishBtn.disabled = false;
+    finishBtn.textContent = window.RR_WORKMODE ? 'Apply setup' : 'Finish';
     launchWrap.hidden = !last;            // Launch AI (Claude/Codex/Gemini) buttons appear on the final step, before Finish
     if (s.type === 'multi') {             // wire the "add a focus view" button (custom default views)
       var addBtn = document.getElementById('rr-view-add');
@@ -765,27 +784,36 @@
       .then(function (){ return (typeof window.RR_submitCommand === 'function') && window.RR_submitCommand('/setup'); });
   }
 
-  /* ---- floating "apply setup" bar (shown after Launch closes the modal) ---- */
-  var finishBar = document.getElementById('rr-setup-finishbar');
-  var sfbMsg    = document.getElementById('rr-sfb-msg');
-  var sfbApply  = document.getElementById('rr-sfb-apply');
-  var sfbDismiss= document.getElementById('rr-sfb-dismiss');
-  var pendingProf = null;
-  function hideFinishBar(){ if (finishBar) finishBar.setAttribute('hidden',''); }
-  function showFinishBar(name){
-    if (!finishBar) return;
-    sfbMsg.innerHTML = 'Log in to <b>' + esc(name) + '</b> in the terminal if prompted, then apply your setup.';
-    sfbApply.disabled = false;
-    finishBar.removeAttribute('hidden');
+  /* ---- the launched assistant, as seen from the Setup modal ----------------
+     Launching keeps this modal OPEN; the app raises the terminal drawer above it
+     (body.rr-term-front) so a trust prompt or a login can be answered right there,
+     and reports what the assistant is doing through `rr-agent-state` events:
+     starting → needs-you (reason: trust | login | confirm | unknown) → ready | gone. */
+  var launchedName = null, launchedState = null, launchedReason = null;
+  function agentStateText(state, name, reason){
+    if (state === 'starting') return name + ' is starting in the terminal below…';
+    if (state === 'ready') return '✓ ' + name + ' is ready — press Apply setup.';
+    if (state === 'sent') return name + ' is applying your setup…';
+    if (state === 'gone') return name + ' closed before setup was applied — launch it again.';
+    if (reason === 'trust') return name + ' is asking whether to trust this folder — choose Yes in the terminal below. Then press Apply setup.';
+    if (reason === 'login') return name + ' wants you to log in — follow the steps in the terminal below. Then press Apply setup.';
+    if (reason === 'confirm') return name + ' is asking you to confirm something in the terminal below. Answer it, then press Apply setup.';
+    return name + ' hasn’t shown its prompt yet. If it is asking you something, answer in the terminal below; once it shows its prompt, press Apply setup.';
   }
-  sfbDismiss.addEventListener('click', hideFinishBar);
-  sfbApply.addEventListener('click', function (){
-    if (!pendingProf) { hideFinishBar(); return; }
-    sfbApply.disabled = true; sfbMsg.textContent = 'Applying your setup…';
-    postIntakeThenSetup(pendingProf).then(function (sent){
-      if (sent) { hideFinishBar(); setupBusy('show'); }
-      else { sfbApply.disabled = false; sfbMsg.innerHTML = 'No agent yet — start it in the terminal, then apply.'; }
-    }).catch(function (){ sfbApply.disabled = false; sfbMsg.textContent = 'Could not apply — try again.'; });
+  function showLaunchState(state, name, reason){
+    launchedName = name; launchedState = state; launchedReason = reason || null;
+    var box = document.getElementById('rr-setup-agent'); if (!box) return;
+    bodyEl.scrollTop = 0;
+    box.hidden = false;
+    box.className = 'rr-setup-agent rr-setup-agent--' + state;
+    box.textContent = agentStateText(state, name, reason);
+    finishBtn.disabled = (state === 'gone');
+  }
+  window.addEventListener('rr-agent-state', function (e){
+    var d = (e && e.detail) || {};
+    if (!launchedName || d.name !== launchedName) return;
+    if (d.state === 'sent') return;                       // our own /setup going out — the busy box takes over
+    showLaunchState(d.state, d.name, d.reason);
   });
 
   /* ---- "Setting up…" busy box (app only) --------------------------------
@@ -801,20 +829,24 @@
   var busyMsg0 = busyMsg ? busyMsg.textContent : '';
   var busySub0 = busySub ? busySub.textContent : '';
   var busyFallback = null;
+  var busySlow = null;                          // "still going" advisory after 2 minutes
+  var busyClose = document.getElementById('rr-setup-busy-close');
   var busyActive = false;                       // a setup run is in flight (box may be HIDDEN if the
                                                 // user clicked "Show terminal" — done must still land)
   function setupBusy(state){                    // 'show' | 'done' | 'hide'
     if (!busyBox) return;
     if (busyFallback) { clearTimeout(busyFallback); busyFallback = null; }
+    if (busySlow) { clearTimeout(busySlow); busySlow = null; }
     if (state === 'show') {
       busyActive = true;
       busyMsg.textContent = busyMsg0; busySub.textContent = busySub0;
-      busyGear.classList.add('rr-spin'); busyTerm.hidden = false;
+      busyGear.classList.add('rr-spin'); busyTerm.hidden = false; if (busyClose) busyClose.hidden = false;
       busyBox.removeAttribute('hidden');
+      busySlow = setTimeout(function (){ if (busyActive) busySub.textContent = 'Still going. Show terminal to see what the assistant is doing — if it is asking you something, answer there.'; }, 120000);
     } else if (state === 'done') {
       if (!busyActive) return;                  // no setup in flight (e.g. box never shown)
       busyActive = false;
-      busyGear.classList.remove('rr-spin'); busyTerm.hidden = true;
+      busyGear.classList.remove('rr-spin'); busyTerm.hidden = true; if (busyClose) busyClose.hidden = true;
       busyMsg.textContent = 'Setup applied ✓';
       busySub.textContent = 'Refreshing to show your personalized setup…';
       busyBox.removeAttribute('hidden');        // re-show even if the user was watching the terminal
@@ -829,18 +861,19 @@
     setupBusy('hide');
     if (typeof window.RR_openTerminal === 'function') window.RR_openTerminal();
   });
+  // Close: put the box away for good — a setup-done that still arrives just reloads quietly
+  if (busyClose) busyClose.addEventListener('click', function (){ busyActive = false; setupBusy('hide'); });
 
-  // Launch the chosen AI (Claude/Codex/Gemini) in the integrated terminal (app only). We snapshot the
-  // answers, launch the agent, then CLOSE the modal so its blurred backdrop stops covering
-  // the terminal (a first-run login must be typed there) — the floating bar finishes it.
+  // Launch the chosen AI (Claude/Codex/Gemini) in the integrated terminal (app only). The modal
+  // stays open: the app raises the terminal above it, the reader answers whatever the
+  // assistant asks there, closes it (or not), and applies from right here.
   launchWrap.addEventListener('click', function (e){
     var b = e.target.closest('[data-rr-agent]'); if (!b) return;
     var name = b.getAttribute('data-rr-agent');
     if (window.RR_WORKMODE && typeof window.RR_launchAgent === 'function') {
-      pendingProf = assemble();
-      window.RR_launchAgent(name);
-      closeModal(setupModal);
-      showFinishBar(name);
+      capture();                                          // keep what was typed on this step
+      if (window.RR_launchAgent(name) === false) return;  // a run/discussion is in progress — the app said so
+      showLaunchState('starting', name);
     } else {
       flash('Launching an assistant needs the app — open ReadingRoom.app (or ReadingRoom.bat), or start `' + name + '` in your own terminal.');
     }
@@ -860,8 +893,11 @@
       // raising the drawer. Needs a running agent (hence the note + guard).
       postIntakeThenSetup(prof).then(function (sent){
         finishBtn.disabled = false;
-        if (sent) { closeModal(setupModal); setupBusy('show'); }
-        else flash('Launch an AI (Claude, Codex, or Gemini) first (button below), then press Finish.');
+        if (sent) { closeModal(setupModal); setupBusy('show'); return; }
+        var st = (typeof window.RR_agentState === 'function') ? window.RR_agentState() : null;
+        if (!st || !st.name) flash('Launch an AI (Claude, Codex, or Gemini) first (button below), then press Apply setup.');
+        else if (st.needsYou && st.needsYou !== 'unknown') flash(agentStateText('needs-you', st.name, st.needsYou));
+        else flash(st.name + ' isn’t ready yet — if it is asking you something, answer in the terminal, then press Apply setup again.');
       }).catch(function (){ finishBtn.disabled = false; showManual(prof); });
     } else {
       showManual(prof);
@@ -932,34 +968,57 @@
   var tutSkip = document.getElementById('rr-tut-skip');
   var tutFinish = document.getElementById('rr-tut-finish');
 
-  function renderTut(){
+  function renderTut(dir){                  // dir: +1 next, -1 back, 0 open (no animation)
     var last = tutIdx === TUTORIAL.length - 1;
     var s = TUTORIAL[tutIdx];
     // a step with `img` shows the real screenshot; otherwise the styled placeholder box
+    // every shot is 3:2 and sits in a fixed 3:2 frame (base.css .rr-tut-media): nothing
+    // is cropped and the frame is the same height on every step, so Next doesn't jump
     var media = s.img
-      ? '<img class="rr-tut-img" src="' + s.img + '" alt="" loading="lazy">'
+      ? '<div class="rr-tut-media"><img class="rr-tut-img" src="' + s.img + '" alt=""></div>'
       : '<div class="rr-tut-shot-box">' + (s.shot === 'gif' ? '<span class="rr-tut-play" aria-hidden="true">&#9658;</span>' : '')
         + '<span class="rr-tut-shot-badge">' + (s.shot === 'gif' ? 'GIF' : 'Image') + ' coming soon</span></div>';
-    tutBody.innerHTML =
+    var html =
       '<figure class="rr-tut-shot rr-tut-shot--' + s.shot + '">'
       + media
       + '<figcaption>' + s.cap + '</figcaption></figure>'
       + '<h3 class="rr-tut-h">' + s.title + '</h3>'
       + '<p class="rr-tut-p">' + s.body + '</p>'
       + (s.body2 ? '<p class="rr-tut-p">' + s.body2 + '</p>' : '');
-    tutStep.textContent = 'Step ' + (tutIdx + 1) + ' of ' + TUTORIAL.length;
-    tutBar.style.width = Math.round(((tutIdx + 1) / TUTORIAL.length) * 100) + '%';
-    tutBack.disabled = tutIdx === 0;
-    tutNext.hidden = last;
-    tutSkip.hidden = last;             // on the last step, "Set up your profile →" replaces Skip/Next
-    tutFinish.hidden = !last;
+    var refocus = document.activeElement === tutNext || document.activeElement === tutFinish;
+    function swap(){
+      tutBody.innerHTML = html;
+      tutBody.scrollTop = 0;                            // a long step must not leave the next one scrolled
+      tutStep.textContent = 'Step ' + (tutIdx + 1) + ' of ' + TUTORIAL.length;
+      tutBar.style.width = Math.round(((tutIdx + 1) / TUTORIAL.length) * 100) + '%';
+      tutBack.disabled = tutIdx === 0;
+      tutNext.hidden = last;
+      tutSkip.hidden = last;             // on the last step, "Set up your profile →" replaces Skip/Next
+      tutFinish.hidden = !last;
+      if (refocus) (last ? tutFinish : tutNext).focus();   // the button that had focus just got hidden
+      if (animate) {
+        tutBody.classList.remove('rr-tut-leave'); tutBody.classList.add('rr-tut-enter');
+        requestAnimationFrame(function (){ requestAnimationFrame(function (){ tutBody.classList.remove('rr-tut-enter'); }); });
+      }
+    }
+    // slide the old step out, swap, slide the new one in (base.css; none under reduced motion)
+    var animate = !!dir && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    if (animate) { tutBody.classList.add('rr-tut-leave'); setTimeout(swap, 150); }
+    else swap();
+  }
+  // the screenshots are decoded once, up front, so a step never flashes a blank frame
+  var tutPreloaded = false;
+  function preloadTut(){
+    if (tutPreloaded) return; tutPreloaded = true;
+    TUTORIAL.forEach(function (s){ if (s.img) { var im = new Image(); im.src = s.img; } });
   }
   function openTutorial(toSetup){
     if (autoOpenTimer) { clearTimeout(autoOpenTimer); autoOpenTimer = null; }
-    tutToSetup = !!toSetup; tutIdx = 0; renderTut(); openModal(tutorialModal);
+    preloadTut();
+    tutToSetup = !!toSetup; tutIdx = 0; renderTut(0); openModal(tutorialModal);
   }
-  tutBack.addEventListener('click', function (){ if (tutIdx > 0) { tutIdx--; renderTut(); } });
-  tutNext.addEventListener('click', function (){ if (tutIdx < TUTORIAL.length - 1) { tutIdx++; renderTut(); } });
+  tutBack.addEventListener('click', function (){ if (tutIdx > 0) { tutIdx--; renderTut(-1); } });
+  tutNext.addEventListener('click', function (){ if (tutIdx < TUTORIAL.length - 1) { tutIdx++; renderTut(1); } });
   tutSkip.addEventListener('click', function (){ closeModal(tutorialModal); });        // closeModal marks seen + chains
   // "Set up your profile →" must open Setup from EVERY path (avatar menu too),
   // not only on the first-run auto-open — closeModal chains when tutToSetup is set.

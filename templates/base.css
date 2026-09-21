@@ -636,6 +636,9 @@ mjx-container[display="true"] { margin: 0.6em 0 1.1em; }
   box-shadow: var(--shadow-card); font-family: var(--sans); color: var(--ink);
 }
 .rr-modal-card--wide { max-width: 760px; }
+/* the tutorial card keeps ONE height across its steps (text length varies), so the
+   footer and its Next button stay exactly where the pointer left them */
+#rr-tutorial-modal .rr-modal-card { height: min(86vh, 760px); }
 body.rr-modal-open { overflow: hidden; }
 
 /* ---- tutorial walkthrough (bigger stepped modal; media are placeholders) ---- */
@@ -656,6 +659,7 @@ body.rr-modal-open { overflow: hidden; }
 .rr-tut-shot figcaption code { font-family: var(--mono); font-size: 11.5px; }
 .rr-tut-h { margin: 0 0 6px; font-family: var(--serif); font-size: 20px; color: var(--ink); }
 .rr-tut-p { margin: 0; font-size: 14.5px; line-height: 1.6; color: var(--ink-soft); }
+.rr-tut-p + .rr-tut-p { margin-top: 10px; }
 .rr-tut-p code { font-family: var(--mono); font-size: 12.5px; background: var(--bg-raised); border-radius: 5px; padding: 1px 5px; }
 .rr-modal-head { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .rr-modal-title { margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 560; color: var(--ink); flex: 1; }
@@ -713,7 +717,8 @@ body.rr-modal-open { overflow: hidden; }
 .rr-q-note { margin: 12px 0 0; font-size: 13px; color: var(--accent); }
 .rr-q-json { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 9px; padding: 12px; font-family: var(--mono); font-size: 12px; color: var(--code-ink); overflow: auto; max-height: 280px; }
 .rr-setup-step { font-family: var(--mono); font-size: 12px; color: var(--ink-faint); }
-.rr-setup-launch { display: inline-flex; gap: 8px; }
+.rr-setup-launch { display: flex; flex-wrap: wrap; gap: 8px; flex-basis: 100%; align-items: center; }   /* its own row: Launch … Apply */
+.rr-setup-launch #rr-setup-finish { margin-left: auto; }
 .rr-setup-launch[hidden] { display: none; }   /* the display rule above otherwise overrides the [hidden] attribute */
 
 /* floating "apply setup" bar — shown after Launch closes the modal so the terminal
@@ -776,11 +781,21 @@ body.rr-modal-open { overflow: hidden; }
   font-family: var(--sans); font-size: 13px; line-height: 1.45; color: var(--ink);
 }
 
-/* real tutorial screenshot (replaces the placeholder box when a step has one) */
-.rr-tut-img {
-  display: block; width: 100%; max-height: 260px;
-  object-fit: cover; object-position: top;
+/* real tutorial screenshot. Every shot and recording is 3:2 (2400x1600 / 1200x800), so the
+   media box is a fixed 3:2 frame: the whole image is always shown (no crop), every step has
+   the same media height (no jump), and it never grows past ~44% of the window so the text
+   below stays in view without scrolling. */
+.rr-tut-media {
+  width: min(100%, calc(44vh * 3 / 2)); aspect-ratio: 3 / 2; margin: 0 auto;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
   border: 1px solid var(--line); border-radius: 10px; background: var(--bg-raised);
 }
-/* GIF steps show the whole frame — the montage's key moments (busy box, report) are centered, so a top-crop would hide them */
-.rr-tut-shot--gif .rr-tut-img { max-height: 340px; object-fit: contain; object-position: center; }
+.rr-tut-img { display: block; width: 100%; height: 100%; object-fit: contain; }
+/* step change: the body slides/fades out, swaps, and slides in (skipped under reduced motion) */
+.rr-tut-body { transition: opacity .16s ease, transform .16s ease; }
+.rr-tut-body.rr-tut-leave { opacity: 0; transform: translateX(-10px); }
+.rr-tut-body.rr-tut-enter { opacity: 0; transform: translateX(10px); transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .rr-tut-body { transition: none; }
+  .rr-tut-body.rr-tut-leave, .rr-tut-body.rr-tut-enter { opacity: 1; transform: none; }
+}

@@ -5,6 +5,36 @@ names the current release; the app's update checker (avatar menu → **Updates**
 looks for a newer version — new commits on a clone's git remote, or a newer
 published release for a ZIP copy — and installs it in one click.
 
+## 1.3.1 — 2026-09-21
+
+- **The assistant's first launch works.** The app now judges an assistant by what it
+  *shows*, not by how many bytes it printed: Claude's, Codex's and Gemini's trust dialogs
+  (and their login screens) are recognised, the terminal comes up **on top of** the
+  Analyze card or the Setup window so you can answer right there, and the command is
+  sent only once the assistant's own prompt is on screen. Before, the "answer in the
+  terminal below" card hid the terminal behind itself, *Show terminal* lost the
+  Continue button, and the command could be typed straight into the trust dialog — which
+  made Claude quit (its default is "No, exit") and left Codex and Gemini idle.
+  *Continue* is offered only when the app cannot tell what the assistant is showing.
+- **Setup keeps its window.** Launching an assistant from the last step no longer closes
+  Setup for a small bar at the top: the terminal opens over it, a status line says what the
+  assistant is asking, and **Apply setup** runs from the same window — refusing, with the
+  reason, while a trust or login prompt is still up. Closing Setup part-way and reopening
+  it resumes where you were; Esc in a field only leaves the field.
+- **Tutorial**: every screenshot is shown whole in a fixed 3:2 frame (the Setup step was
+  cropped to its top half), the card keeps one height so *Next* stays under the pointer,
+  images are preloaded, and steps slide instead of re-laying out.
+- Starting a flow while a **Discussion** is running now shows the discussion and offers End
+  chat / Stop instead of killing it silently; *End chat* appears once the discussion has
+  actually started. Esc typed in the terminal belongs to the assistant (it no longer closes
+  the drawer, a panel or Setup). A missing CLI fails the run with that reason at once.
+- A run whose page failed to **build** is reported as such (the file is kept) instead of
+  "Added to your library"; a run whose assistant quit while no window was open is ended
+  and rolled back by the server after 30 s, and a page that opens later is told so.
+- Assistant choice, model/effort settings and the sort order now travel with the install
+  (they survive a port change and a new browser), like the reading state.
+- READMEs: the app's is short and points at the website; the website's summarises the app.
+
 ## 1.3.0 — 2026-09-19
 
 - **Analyze a PDF from your computer.** *Choose PDF…* in the Analyze panel, or drop
