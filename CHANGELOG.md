@@ -5,6 +5,13 @@ names the current release; the app's update checker (avatar menu → **Updates**
 looks for a newer version — new commits on a clone's git remote, or a newer
 published release for a ZIP copy — and installs it in one click.
 
+## 1.3.2 — 2026-09-22
+
+- **The model you pick has to exist for your account.** Assistant settings now lists the models each CLI on this machine actually offers — Codex's own list for your login (with the reasoning levels each model takes), Claude Code's aliases and effort levels, each CLI's configured default — instead of a list baked into the app. A Codex model or effort that isn't on its list is flagged in the settings and refused before a run starts, with the reason and the models to choose from. Before, a typo'd or unavailable model (`gpt-6`) booted fine and failed only once the command was in: `The 'gpt-6' model is not supported when using Codex with a ChatGPT account`, and the run spun.
+- **An assistant that answers with an error is reported at once.** A run or discussion whose assistant replies with an error instead of working — a model it can't use, an expired login, a usage or rate limit — shows the assistant's own message on the card within a second. A fatal one (model / login) stops the run, rolls back and offers **Assistant settings**; a transient one (rate limit) stays advisory and clears once the assistant carries on.
+- **`CLAUDE.md`, `AGENTS.md`, `GEMINI.md` are now written for the reader's assistant** — the commands, where data lives and the conventions for writing a digest, in ~65 lines — instead of the app's full design notes (Claude Code warned the file was over its size limit).
+- Docs: the install pages say which release ZIP exists today; the Gatekeeper command strips quarantine recursively.
+
 ## 1.3.1 — 2026-09-21
 
 - **The assistant's first launch works.** The app now judges an assistant by what it

@@ -22,7 +22,7 @@ HTML that is yours.
    - Windows (PowerShell): `cd ~; git clone https://github.com/FrancescoPiatti/Reading-Room.git ReadingRoom; explorer ReadingRoom`
    - Linux: `cd ~ && git clone https://github.com/FrancescoPiatti/Reading-Room.git ReadingRoom && cd ReadingRoom`
 
-   Or download a [release](https://github.com/FrancescoPiatti/Reading-Room/releases) — one ZIP per platform with the app's dependencies already built.
+   Or download a [release](https://github.com/FrancescoPiatti/Reading-Room/releases) — a ZIP with the app's dependencies already built (macOS on Apple silicon today; clone on Windows and Linux).
 4. **Double-click `ReadingRoom.app`** (macOS), **`ReadingRoom.bat`** (Windows) or **`ReadingRoom.sh`** (Linux). A short tutorial opens and hands you to Setup. Two example papers are already in the catalogue.
 
 macOS may block the unsigned app the first time: **System Settings → Privacy & Security → Open Anyway** (or `xattr -dr com.apple.quarantine ReadingRoom.app`). Windows may show SmartScreen: **More info → Run anyway**. The [website's install page](https://francescopiatti.github.io/Reading-Room-Website/how-to-install.html) has the full walkthrough, including every prerequisite.

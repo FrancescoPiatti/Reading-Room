@@ -296,6 +296,7 @@ select.rr-flow-select { appearance: auto; -webkit-appearance: menulist; cursor: 
 .rr-ai-field .rr-analyze-label { margin: 0; }
 .rr-ai-cfg .rr-analyze-help { grid-column: 1 / -1; margin: 0; }
 .rr-ai-cfg .rr-analyze-input.rr-bad { border-color: var(--rr-wm-danger, #b3361a); }
+.rr-ai-warn { color: var(--rr-wm-danger, #b3361a); }
 .rr-aicfg-body .rr-analyze-ai { margin-top: 4px; }
 @media (max-width: 640px) { .rr-ai-cfg { grid-template-columns: 1fr; } }
 

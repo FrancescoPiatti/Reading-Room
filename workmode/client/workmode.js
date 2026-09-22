@@ -357,6 +357,7 @@
         if (term) term.write(m.data);
         lastPtyData = Date.now();
         if (job && job.started) noteOutput(m.data);     // run card: "still working, this is the last thing it said"
+        noteError(m.data);                               // an error instead of work: say so (a fatal one ends the run)
 
         if (bootWatch) bootWatch.note(m.data);           // dialog? ready? (see makeBootWatch)
         // belt-and-braces: the assistant producing output IS the launch happening —
@@ -553,6 +554,10 @@
   // onNeedsYou(reason), onReady(), then() (legacy hint hook)
   function launchAgent(name, opts){
     opts = opts || {};
+    // a model the account can't use: refuse now, with the reason, rather than let the
+    // flow command fail at the first request (onFail('model', why) / a toast)
+    var prob = modelProblem(name);
+    if (prob){ setHint(''); if (opts.onFail) opts.onFail('model', prob); else toast(prob, 'Settings', openAiCfgModal); return false; }
     if (!opts.headless) openDrawer();
     if (opts.raise) raiseDrawer();
     endChatBtn.hidden = true;                          // a freshly launched agent has no /learn chat yet
@@ -572,6 +577,7 @@
       wantRespawn = true;               // converts the in-flight/upcoming spawn into a respawn
     }
     if (!opts.headless && term) term.focus();
+    return true;
   }
 
   /* ---------------------------------------------------------- resize handle */
@@ -623,6 +629,7 @@
   function manualLaunch(name, opts){
     if (job && job.started){ toast('A paper is being written right now — wait for it, or Stop it from its card, before launching an assistant'); return false; }
     if (discuss && discuss.started){ toast('A discussion is running — End chat (or Stop it) before launching an assistant'); return false; }
+    var prob = modelProblem(name); if (prob){ toast(prob, 'Settings', openAiCfgModal); return false; }
     abandonRuns(); launchAgent(name, opts); return true;
   }
   window.RR_launchAgent = function (name){ return manualLaunch(name, { raise: true }); };
@@ -815,7 +822,7 @@
         setHint('launching ' + ai + ' to review your profile …');
         launchAgent(ai, { cmd: flowCommand(ai, '/setup --review-profile'),
           onSent: function (){ setHint('the assistant is reviewing your profile — follow along here'); toast('Profile saved — ' + ai + ' is reviewing it in the terminal'); },
-          onFail: function (why){ toast('Profile saved, but ' + ai + (why === 'exited' ? ' closed before it could review it' : ' isn’t installed here') + ' — open the Terminal and run /setup --review-profile when you like'); } });
+          onFail: function (why, detail){ toast(why === 'model' ? ('Profile saved, but ' + detail + ' Then open the Terminal and run /setup --review-profile.') : ('Profile saved, but ' + ai + (why === 'exited' ? ' closed before it could review it' : ' isn’t installed here') + ' — open the Terminal and run /setup --review-profile when you like')); } });
       });
     });
     profOv._ta = ta; profOv._save = save;
@@ -1075,16 +1082,66 @@
   // job looks supervised instead of hung. TUIs redraw whole screens, so strip the
   // escape sequences and keep the last line that actually reads like a sentence.
   var lastOutLine = '';
-  function noteOutput(s){
-    var t = String(s == null ? '' : s)
+  function plainText(s){                          // pty bytes → readable lines (no escapes)
+    return String(s == null ? '' : s)
       .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')       // OSC (window titles)
       .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '')              // CSI (colour, cursor)
       .replace(/\x1b[()][0-9A-Za-z]/g, '')
       .replace(/[\r\x00-\x08\x0b-\x1f\x7f]/g, '\n');
+  }
+  function noteOutput(s){
+    var t = plainText(s);
     var lines = t.split('\n');
     for (var i = lines.length - 1; i >= 0; i--){
       var ln = lines[i].replace(/[─-╿▀-▟]/g, ' ').trim();   // box drawing
       if (ln.length > 3 && /[A-Za-z]{3}/.test(ln)) { lastOutLine = ln.slice(0, 140); return; }
+    }
+  }
+  // The assistant answered the command with an ERROR instead of working — a model the
+  // account can't use (codex: `{"type":"error","status":400 … "The 'gpt-6' model is not
+  // supported when using Codex with a ChatGPT account"}`, and it stays open; claude:
+  // `API Error: 404 … not_found_error`; gemini: `models/x is not found`), an expired login,
+  // a usage limit. Its process is still alive, so the exit poll can't see it, and the quiet
+  // watchdog would only say "may be waiting" 90 s later. Name it at once. A FATAL one
+  // (model / auth) ends the run — nothing can follow it; the rest (limits, rate limits —
+  // the CLIs retry those) stay advisory and give way to the working status again.
+  var ERR_RE = /"type":\s*"error"|invalid_request_error|not_found_error|authentication_error|permission_error|insufficient_quota|resource_exhausted|api error:?\s*\d{3}|model[^\n]{0,80}?\bnot (?:supported|found|available)|not supported when using|invalid model|usage limit|session limit|credit balance|rate.?limit|too many requests|unauthori[sz]ed|invalid api key|not logged in|please (?:log|sign) ?in/i;
+  var FATAL_RE = /not supported when using|model[^\n]{0,80}?\bnot (?:supported|available)|model[^\n]{0,40}?\bnot found\b|not_found_error|invalid model|authentication_error|permission_error|invalid api key|not logged in|please (?:log|sign) ?in|credit balance|insufficient_quota/i;
+  var errBuf = '', errTimer = null;
+  function noteError(chunk){
+    if (!((job && job.started && !job.resultId) || (discuss && discuss.started))){ errBuf = ''; return; }
+    errBuf = (errBuf + plainText(chunk)).slice(-6000);    // an error can straddle two chunks
+    if (errTimer || !ERR_RE.test(errBuf)) return;
+    errTimer = setTimeout(reportError, 800);              // let the rest of the message (a wrapped JSON) arrive first
+  }
+  function reportError(){
+    errTimer = null;
+    var m = ERR_RE.exec(errBuf); if (!m) { errBuf = ''; return; }
+    var at = m.index, start = errBuf.lastIndexOf('\n', at) + 1;
+    var seg = errBuf.slice(start, start + 600), cut = seg.search(/\n\s*\n/);   // the paragraph the match sits in (TUIs wrap long lines)
+    if (cut > 0) seg = seg.slice(0, cut);
+    var line = seg;
+    var jm = /"message"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(errBuf.slice(Math.max(0, at - 300), at + 700));   // the JSON's own message, wrapped or not
+    if (jm){                                              // "API Error: 404 — model: gpt-6", not the whole JSON
+      var pre = seg.indexOf('{') > 0 ? seg.slice(0, seg.indexOf('{')).replace(/[■•⏺✻›❯⚠✗×!\s]+/g, ' ').trim() : '';
+      line = (pre ? pre + ' — ' : '') + jm[1].replace(/\\"/g, '"');
+    }
+    line = line.replace(/^[■•⏺✻›❯⚠✗×!\s]+/, '').replace(/\s+/g, ' ').trim().slice(0, 220).replace(/[.\s]+$/, '');
+    errBuf = '';                                          // each error is reported once
+    if (!((job && job.started && !job.resultId) || (discuss && discuss.started))) return;
+    // fatal is judged on the whole error (the JSON's error type sits outside its message);
+    // codex's "Model metadata … not found" is a warning — the 400 that follows is the error
+    var fatal = (FATAL_RE.test(seg) || FATAL_RE.test(line)) && !/metadata for/i.test(seg);
+    var who = launchedAi || 'the assistant';
+    var fix = '. Fix it (Assistant settings → model, or log in), then try again.';
+    if (job){
+      if (fatal){ stopJob('user', who + ' reported an error: ' + line + fix + ' Nothing was added to your library.', { label: 'Assistant settings', run: openAiCfgModal }); return; }
+      job.errorAt = Date.now();
+      setJobStatus(who + ' reported: ' + line + ' — it may recover on its own; if not, open the terminal or Stop.');
+      if (!(flowOv && flowOv.classList.contains('rr-show'))) toast(who + ' reported an error', 'Show terminal', function (){ openDrawer(); });
+    } else if (discuss){
+      if (fatal){ stopDiscussion(who + ' reported an error: ' + line + fix + ' Nothing was saved.'); return; }
+      toast(who + ' reported: ' + line);
     }
   }
   function fmtElapsed(ms){
@@ -1128,8 +1185,9 @@
           if (flowOv && flowOv.classList.contains('rr-show')) renderRun(flowOv._card);
         },
         onReady: function (){ if (job === me && job.needsYou) setJobStatus(spec.ai + ' is ready — sending the command …'); },
-        onFail: function (why){
+        onFail: function (why, detail){
           if (job !== me) return;
+          if (why === 'model'){ stopJob('exited', detail + ' Nothing was added to your library.', { label: 'Assistant settings', run: openAiCfgModal }); return; }
           stopJob('exited', why === 'exited'
             ? spec.ai + ' closed before the command could be sent (did it get “No, exit”?). Try again and answer its prompt — nothing was added to your library.'
             : spec.ai + ' isn’t installed here (or isn’t on the shell’s PATH). Install it — the README has the steps — then try again. Nothing was added to your library.');
@@ -1156,6 +1214,7 @@
       job.warned = false;
       setJobStatus(job.spec.working);          // output resumed — all good again
     }
+    if (job.errorAt && lastPtyData - job.errorAt > 30000){ job.errorAt = 0; setJobStatus(job.spec.working); }   // it carried on after the error
   }
   // a completion broadcast arrived; if it's ours, poll until the artifact verifies, then finish
   function jobOnBroadcast(m){
@@ -1205,7 +1264,7 @@
   // assistant, then rolls back; 'exited': the assistant is already gone (pty exit,
   // or quit from the terminal — the old "overlay spins forever" bug), roll back only.
   // A run that never reached job-start has nothing to roll back — finish at once.
-  function stopJob(reason, text){
+  function stopJob(reason, text, action){
     if (!job) return;
     if (job.resultId){                             // it already finished — a Stop now just means "show me"
       var rid = job.resultId, url = job.spec.openUrl(rid); jobDone(rid, url); return;
@@ -1224,10 +1283,10 @@
       // no token = "kill the booting assistant only": the server rolls back nothing
       if (reason === 'user') send({ type: 'job-stop', reason: 'user' });
       else if (!arguments[1]) text = 'The assistant didn’t start (or quit before the command was sent). Open the terminal to see what happened. Nothing was added to your library.';
-      showFlowStopped(j.spec, text);
+      showFlowStopped(j.spec, text, action);
       return;
     }
-    stopping = { spec: j.spec, text: text, timer: null };
+    stopping = { spec: j.spec, text: text, timer: null, action: action || null };
     setJobStatus(reason === 'user' ? 'Stopping…' : 'Cleaning up…');
     if (flowOv && flowOv.classList.contains('rr-show')) renderRun(flowOv._card, true);
     // the token proves this page owns the registered run — without it the server only
@@ -1267,7 +1326,7 @@
     if (m && m.removed && m.removed.length) extra = ' Removed what it had started writing (' + m.removed.length + ' item' + (m.removed.length === 1 ? '' : 's') + ').';
     else if (m && m.restored) extra = ' The report was restored to how it was.';
     else if (m && m.stale) extra = ' (That run had already finished or belonged to another page — nothing was removed.)';
-    showFlowStopped(s.spec, s.text + extra);
+    showFlowStopped(s.spec, s.text + extra, s.action);
   }
   function jobOnExit(msg){
     if (!job) return;
@@ -1562,12 +1621,13 @@
     flowOv._status = st;
   }
   // final card after a rollback: nothing was added; Close, or Try again (the same flow's form)
-  function showFlowStopped(spec, text){
+  function showFlowStopped(spec, text, action){
     jobStatusText = '';
     if (spec && spec.onStopped) spec.onStopped();                 // a stopped queue stops for good
     text = text || 'Stopped — nothing was added to your library.';
     if (!(flowOv && flowOv.classList.contains('rr-show'))){
-      toast(text, 'Try again', function (){ if (spec.again) spec.again(); });
+      if (action) toast(text, action.label, action.run);
+      else toast(text, 'Try again', function (){ if (spec.again) spec.again(); });
       return;
     }
     flowOv._title.textContent = spec.title; flowOv._showTerm.hidden = false;
@@ -1580,6 +1640,11 @@
     again.addEventListener('click', function (){ if (spec.again) spec.again(); else closeFlow(); });
     var close = el('button', 'rr-wm-btn', ICO_X + '<span>Close</span>'); close.type = 'button';
     close.addEventListener('click', closeFlow);
+    if (action){                                                  // e.g. Assistant settings, when the model was the problem
+      var act = el('button', 'rr-wm-btn', ICO_GEAR + '<span>' + esc(action.label) + '</span>'); act.type = 'button';
+      act.addEventListener('click', function (){ closeFlow(); action.run(); });
+      actions.appendChild(act);
+    }
     actions.appendChild(again); actions.appendChild(close);
     box.appendChild(actions); card.appendChild(box);
     flowOv._status = null;
@@ -1642,11 +1707,64 @@
   /* ---- assistant settings: model + reasoning effort per assistant (persisted in
      localStorage 'rr-wm-ai-cfg' as {claude:{model,effort}, codex:{…}, gemini:{model}}).
      They become CLI flags on the launch line — nothing else changes. ---- */
-  var AI_MODELS = { claude: ['opus', 'sonnet', 'haiku'], codex: ['gpt-5-codex', 'gpt-5', 'o3'], gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'] };
-  var AI_EFFORTS = { claude: ['low', 'medium', 'high', 'xhigh', 'max'], codex: ['minimal', 'low', 'medium', 'high', 'xhigh'], gemini: [] };
+  // Fallbacks only — the live lists come from GET /api/ai-models: what each CLI on THIS
+  // machine reports (codex's own models cache for the login, `claude --help`'s aliases and
+  // effort levels, the CLIs' configured defaults). A model the CLI takes on its command
+  // line but the account can't use fails only at the first request, after the flow command
+  // is in — so where the list is authoritative (codex) an unlisted model is refused up front,
+  // and everywhere else the runtime error scan (noteError) names the failure at once.
+  var AI_MODELS = { claude: ['fable', 'opus', 'sonnet', 'haiku'], codex: [], gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'] };
+  var AI_EFFORTS = { claude: ['low', 'medium', 'high', 'xhigh', 'max'], codex: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'], gemini: [] };
+  var aiModels = null;                     // the /api/ai-models answer, once it has arrived
+  var aiModelsPromise = null;
+  function loadAiModels(){
+    if (!aiModelsPromise) aiModelsPromise = fetch('/api/ai-models').then(function (r){ return r.json(); }).then(function (j){ if (j && j.ok) aiModels = j; return aiModels; }).catch(function (){ return null; });
+    return aiModelsPromise;
+  }
+  function codexListed(model){             // codex's cache entry for a model, when it published a list
+    var c = aiModels && aiModels.codex; if (!c || !c.known || !model) return null;
+    for (var i = 0; i < c.list.length; i++) if (c.list[i].slug === model) return c.list[i];
+    return null;
+  }
+  // the model names to suggest (datalist): the machine's list first, the fallbacks after
+  function modelSuggestions(name){
+    var m = aiModels && aiModels[name], out = [];
+    if (name === 'codex' && m && m.known) m.list.forEach(function (x){ if (!x.hidden) out.push(x.slug); });
+    else if (m && m.suggest) out = m.suggest.slice();
+    (AI_MODELS[name] || []).forEach(function (x){ if (out.indexOf(x) === -1) out.push(x); });
+    return out;
+  }
+  // the reasoning levels this assistant — and, for codex, this model — accepts
+  function effortsFor(name, model){
+    if (name === 'codex'){ var e = codexListed(model); if (e && e.efforts.length) return e.efforts.slice(); }
+    if (name === 'claude' && aiModels && aiModels.claude && aiModels.claude.efforts && aiModels.claude.efforts.length) return aiModels.claude.efforts.slice();
+    return (AI_EFFORTS[name] || []).slice();
+  }
+  function effortKnown(name, effort){       // any level this assistant might take (fallbacks ∪ machine)
+    if (!effort) return false;
+    var all = (AI_EFFORTS[name] || []).slice(), m = aiModels && aiModels[name];
+    if (name === 'codex' && m && m.known) m.list.forEach(function (x){ x.efforts.forEach(function (e){ if (all.indexOf(e) === -1) all.push(e); }); });
+    if (name === 'claude' && m && m.efforts) m.efforts.forEach(function (e){ if (all.indexOf(e) === -1) all.push(e); });
+    return all.indexOf(effort) !== -1;
+  }
+  // Why the saved model / effort cannot work, or ''. Authoritative only where the CLI
+  // publishes its list for the login (codex); the other CLIs fail at the first request
+  // and noteError reports that.
+  function modelProblem(name, inPanel){
+    if (name !== 'codex' || !aiModels || !aiModels.codex || !aiModels.codex.known) return '';
+    var c = aiCfgFor(name), listed = codexListed(c.model);
+    var fix = inPanel ? ' Pick one of them, or leave the field blank for Codex’s own default.' : ' Change it in Assistant settings (blank = Codex’s own default).';
+    if (c.model && !listed) return 'Codex doesn’t offer “' + c.model + '” to your account — it would answer “model is not supported” as soon as the command is sent. Models it lists: ' + modelSuggestions('codex').slice(0, 6).join(', ') + '.' + fix;
+    if (c.effort){
+      var efforts = listed ? listed.efforts : effortsFor('codex', aiModels.codex.default.model);
+      if (efforts.length && efforts.indexOf(c.effort) === -1) return (c.model || 'Codex’s default model') + ' doesn’t take “' + c.effort + '” reasoning effort — it supports ' + efforts.join(', ') + '.' + (inPanel ? '' : ' Change it in Assistant settings.');
+    }
+    return '';
+  }
   function cleanModel(v){ v = String(v || '').trim(); return /^[A-Za-z0-9._:\/-]{1,80}$/.test(v) ? v : ''; }
   function aiCfg(){ try { var c = JSON.parse(lsGet('rr-wm-ai-cfg', '{}')); return (c && typeof c === 'object' && !Array.isArray(c)) ? c : {}; } catch (e) { return {}; } }
-  function aiCfgFor(name){ var c = aiCfg()[name] || {}; return { model: cleanModel(c.model), effort: (AI_EFFORTS[name] || []).indexOf(c.effort) !== -1 ? c.effort : '' }; }
+  function aiCfgFor(name){ var c = aiCfg()[name] || {}; return { model: cleanModel(c.model), effort: effortKnown(name, c.effort) ? c.effort : '' }; }
+  loadAiModels();
   function setAiCfg(name, patch){ var c = aiCfg(); c[name] = Object.assign({}, c[name] || {}, patch); lsSet('rr-wm-ai-cfg', JSON.stringify(c)); }
   // the launch line: AUTO-mode flags + the reader's model / effort, in each CLI's own syntax
   function aiCommand(name){
@@ -1666,32 +1784,56 @@
   function aiSummary(name){
     var c = aiCfgFor(name), parts = [name, c.model || 'default model'];
     if ((AI_EFFORTS[name] || []).length) parts.push(c.effort ? (c.effort + ' effort') : 'default effort');
-    return parts.join(' · ');
+    return parts.join(' · ') + (modelProblem(name) ? ' ⚠' : '');
   }
-  // the settings fields for one assistant (inline under the pills, and in the Terminal ▾ modal)
+  // the settings fields for one assistant (inline under the pills, and in the Terminal ▾ modal):
+  // the model (datalist from the machine's list), the reasoning levels THAT model takes,
+  // and a warning when the saved choice cannot work
   function renderAiCfg(box, name, onChange){
     box.innerHTML = '';
-    var c = aiCfgFor(name);
+    var c = aiCfgFor(name), m = aiModels && aiModels[name], hadModels = !!aiModels;
     var f1 = el('label', 'rr-ai-field'); f1.appendChild(el('span', 'rr-analyze-label', 'Model'));
     var inp = el('input', 'rr-analyze-input'); inp.type = 'text'; inp.autocomplete = 'off'; inp.spellcheck = false; inp.value = c.model;
-    inp.placeholder = 'default — or e.g. ' + (AI_MODELS[name] || []).slice(0, 2).join(', ');
+    var sugg = modelSuggestions(name);
+    inp.placeholder = 'default' + (m && m.default && m.default.model ? ' (' + m.default.model + ')' : '') + (sugg.length ? ' — or e.g. ' + sugg.slice(0, 2).join(', ') : '');
     var dl = el('datalist'); dl.id = 'rr-ai-models-' + name + '-' + Math.floor(Math.random() * 1e6);
-    (AI_MODELS[name] || []).forEach(function (m){ var o = document.createElement('option'); o.value = m; dl.appendChild(o); });
+    sugg.forEach(function (sl){ var o = document.createElement('option'); o.value = sl; var e = name === 'codex' ? codexListed(sl) : null; if (e && e.name && e.name !== sl) o.label = e.name; dl.appendChild(o); });
     inp.setAttribute('list', dl.id); f1.appendChild(inp); f1.appendChild(dl); box.appendChild(f1);
+    var warn = el('div', 'rr-analyze-help rr-ai-warn'); warn.hidden = true;
     var help = el('div', 'rr-analyze-help');
-    function paintHelp(){ help.innerHTML = 'Blank = the CLI’s own default. Launch line: <code>' + esc(aiCommand(name)) + '</code>'; }
-    inp.addEventListener('input', function (){
-      var v = inp.value.trim(); inp.classList.toggle('rr-bad', !!v && !cleanModel(v));
-      setAiCfg(name, { model: cleanModel(v) ? v : '' }); paintHelp(); if (onChange) onChange();
-    });
-    if ((AI_EFFORTS[name] || []).length){
-      var f2 = el('label', 'rr-ai-field'); f2.appendChild(el('span', 'rr-analyze-label', 'Reasoning effort'));
-      var sel = el('select', 'rr-analyze-input rr-flow-select'); sel.appendChild(new Option('default', ''));
-      AI_EFFORTS[name].forEach(function (e){ sel.appendChild(new Option(e, e)); }); sel.value = c.effort;
-      sel.addEventListener('change', function (){ setAiCfg(name, { effort: sel.value }); paintHelp(); if (onChange) onChange(); });
-      f2.appendChild(sel); box.appendChild(f2);
+    var f2 = null, sel = null;
+    function paintEfforts(){
+      var efforts = effortsFor(name, aiCfgFor(name).model);
+      if (!efforts.length){ if (f2) f2.hidden = true; return; }
+      if (!f2){
+        f2 = el('label', 'rr-ai-field'); f2.appendChild(el('span', 'rr-analyze-label', 'Reasoning effort'));
+        sel = el('select', 'rr-analyze-input rr-flow-select'); f2.appendChild(sel); box.insertBefore(f2, warn);
+        sel.addEventListener('change', function (){ setAiCfg(name, { effort: sel.value }); paintHelp(); if (onChange) onChange(); });
+      }
+      f2.hidden = false;
+      var cur = aiCfgFor(name).effort; sel.innerHTML = ''; sel.appendChild(new Option('default', ''));
+      efforts.forEach(function (e){ sel.appendChild(new Option(e, e)); });
+      if (cur && efforts.indexOf(cur) === -1) sel.appendChild(new Option(cur + ' (not supported)', cur));
+      sel.value = cur;
     }
-    paintHelp(); box.appendChild(help);
+    function paintHelp(){
+      var prob = modelProblem(name, true), v = inp.value.trim();
+      warn.hidden = !prob; warn.textContent = prob;
+      inp.classList.toggle('rr-bad', !!prob || (!!v && !cleanModel(v)));
+      var src = '';
+      if (name === 'codex' && m && m.known) src = ' Models Codex lists for your account: ' + modelSuggestions('codex').join(', ') + '.';
+      else if (name === 'codex' && hadModels) src = ' Codex hasn’t published its model list on this machine yet — launch it once, then reopen this.';
+      var dflt = m && m.default && m.default.model ? ' (' + esc(m.default.model) + (m.default.effort ? ', ' + esc(m.default.effort) : '') + ')' : '';
+      help.innerHTML = 'Blank = the CLI’s own default' + dflt + '.' + esc(src) + ' Launch line: <code>' + esc(aiCommand(name)) + '</code>';
+    }
+    inp.addEventListener('input', function (){
+      var v = inp.value.trim();
+      setAiCfg(name, { model: cleanModel(v) ? v : '' }); paintEfforts(); paintHelp(); if (onChange) onChange();
+    });
+    box.appendChild(warn); box.appendChild(help);
+    paintEfforts(); paintHelp();
+    // painted before the machine's list arrived: repaint once, when it does
+    if (!hadModels) loadAiModels().then(function (){ if (aiModels && document.body.contains(box)) renderAiCfg(box, name, onChange); });
     return box;
   }
   // assistant pills (claude/codex/gemini), persisted; greys out any not on PATH; a gear
@@ -1762,6 +1904,7 @@
     if (!document.querySelector('.rr-modal:not([hidden])')) document.body.classList.remove('rr-modal-open');
   }
   window.RR_openAssistantSettings = openAiCfgModal;
+  window.RR_modelProblem = modelProblem;               // '' or why the saved model/effort can't work (Setup's launch row)
   // multi-select checklist of catalogued papers (for Compare). → getter (array of ids)
   // opts.search: a search box above the list (title / venue / year / id, case-
   // insensitive substring). Filtering only hides rows — selections survive it.
@@ -2187,8 +2330,9 @@
       },
       // a first-launch dialog: the drawer is already open; the bar shows why (and Continue if unsure)
       onNeedsYou: function (reason){ if (discuss && discuss.id === id) toast(needsYouStatus(ai, reason)); },
-      onFail: function (why){ if (discuss && discuss.id === id) discussOnExit(why === 'exited' ? ai + ' closed before the discussion could start — try again and answer its prompt.' : ai + ' isn’t installed here (or isn’t on the shell’s PATH) — the README has the install steps.'); },
+      onFail: function (why, detail){ if (discuss && discuss.id === id) discussOnExit(why === 'model' ? detail : why === 'exited' ? ai + ' closed before the discussion could start — try again and answer its prompt.' : ai + ' isn’t installed here (or isn’t on the shell’s PATH) — the README has the install steps.'); },
     });
+    if (!discuss) return;                                       // refused up front (a model the account can't use)
     // AFTER launchAgent (it hides End chat for a plain launch): Stop is available at once,
     // End chat once the /learn command has actually gone out (onSent)
     endChatBtn.hidden = true; stopChatBtn.hidden = false;
@@ -2212,7 +2356,7 @@
     toast(text || 'The discussion ended before it was saved — nothing was added to your library.');
   }
   // Stop discussion: abandon it — the server kills the assistant and rolls back (nothing saved)
-  function stopDiscussion(){
+  function stopDiscussion(text){
     if (!discuss){ stopChatBtn.hidden = true; return; }
     var d = discuss; discuss = null;
     if (bootWatch) bootWatch.cancel();
@@ -2223,7 +2367,7 @@
     if (d.started) withToken(d, function (token){ send({ type: 'job-stop', reason: 'user', token: token }); });
     else send({ type: 'job-stop', reason: 'user' });
     setHint('discussion stopped — nothing was saved'); keepHintUntil = Date.now() + 5000;   // the pty exit that follows must not overwrite it
-    toast('Discussion stopped — nothing was saved.');
+    toast(typeof text === 'string' ? text : 'Discussion stopped — nothing was saved.');
   }
   stopChatBtn.addEventListener('click', stopDiscussion);
 
@@ -2449,7 +2593,7 @@
     abandonRuns();                                   // a hidden run or discussion can't survive the respawn
     launchAgent(ai, { cmd: flowCommand(ai, '/update'),
       onSent: function (){ setHint('/update is running — follow along here'); },
-      onFail: function (why){ toast(ai + (why === 'exited' ? ' closed before /update could start' : ' isn’t installed here') + ' — open the Terminal and run /update yourself'); } });
+      onFail: function (why, detail){ toast(why === 'model' ? detail : (ai + (why === 'exited' ? ' closed before /update could start' : ' isn’t installed here') + ' — open the Terminal and run /update yourself')); } });
   }
   // avatar menu "Updates" (force → refresh=1 re-fetches origin)
   window.RR_openUpdates = function (force){

@@ -242,7 +242,7 @@ function runProc(cmd, args, opts, cb) {
   const cap = o.cap || 64 * 1024;
   let child;
   try {
-    child = spawn(cmd, args, { cwd: o.cwd || REPO, env: o.env || process.env, shell: !!o.shell, windowsHide: true });
+    child = spawn(cmd, args, { cwd: o.cwd || REPO, env: o.env || process.env, shell: !!o.shell, windowsHide: true, stdio: o.noStdin ? ['ignore', 'pipe', 'pipe'] : 'pipe' });   // noStdin: a CLI that reads piped stdin (claude) must not wait on ours
   } catch (e) {
     return cb({ code: -1, stdout: '', stderr: '', timedOut: false, error: e.message });
   }
@@ -427,6 +427,92 @@ app.get('/api/status', (req, res) => {
 app.get('/api/term-children', (req, res) => {
   countShellChildren((n) => res.json({ ok: true, children: n }));
 });
+
+// --- assistant models -------------------------------------------------------
+// A model the CLI accepts on its command line but the account can't use fails only
+// at the FIRST REQUEST — after the flow command is already in (codex: `{"type":"error",
+// "status":400 … "The 'gpt-6' model is not supported when using Codex with a ChatGPT
+// account"}`, and it stays open, so the run would spin). The pickers are therefore fed
+// from the machine, not from a list baked into the app:
+//   codex  → ~/.codex/models_cache.json, the list codex itself fetched for this login
+//            (slugs, display names, the reasoning levels each supports) + the defaults
+//            in ~/.codex/config.toml. With a cache the list is AUTHORITATIVE (known:true)
+//            and the client refuses to launch an unlisted model.
+//   claude → the aliases and effort levels `claude --help` prints + the default model
+//            in ~/.claude/settings.json (suggestions; any alias/ID may be valid).
+//   gemini → no list is published locally: the CLI's own defaults + ~/.gemini/settings.json.
+let aiModelsCache = { at: 0, data: null };
+let claudeHelpCache = null;
+function codexHome() { return process.env.CODEX_HOME || path.join(os.homedir(), '.codex'); }
+function readCodexModels() {
+  const out = { list: [], known: false, default: { model: '', effort: '' }, fetchedAt: null };
+  try {
+    const cfg = fs.readFileSync(path.join(codexHome(), 'config.toml'), 'utf8');
+    const m = /^\s*model\s*=\s*"([^"\n]*)"/m.exec(cfg); if (m) out.default.model = m[1];
+    const e = /^\s*model_reasoning_effort\s*=\s*"([^"\n]*)"/m.exec(cfg); if (e) out.default.effort = e[1];
+  } catch (e) {}
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(codexHome(), 'models_cache.json'), 'utf8'));
+    const models = j && Array.isArray(j.models) ? j.models : [];
+    out.fetchedAt = (j && j.fetched_at) || null;
+    for (const m of models) {
+      if (!m || typeof m.slug !== 'string' || !/^[A-Za-z0-9._:\/-]{1,80}$/.test(m.slug)) continue;
+      out.list.push({
+        slug: m.slug, name: String(m.display_name || m.slug).slice(0, 60), description: String(m.description || '').slice(0, 160),
+        hidden: m.visibility !== 'list',
+        efforts: Array.isArray(m.supported_reasoning_levels) ? m.supported_reasoning_levels.map((l) => l && l.effort).filter((x) => typeof x === 'string') : [],
+        defaultEffort: typeof m.default_reasoning_level === 'string' ? m.default_reasoning_level : '',
+      });
+    }
+    out.known = out.list.length > 0;
+  } catch (e) {}
+  return out;
+}
+// `claude --help` takes a couple of seconds (a Node CLI starting up): probe it once in the
+// background, at startup and again on the first request that finds nothing, and never
+// make the route wait for it — the fallbacks serve until the real text is in.
+let claudeHelpProbe = null;
+function probeClaudeHelp() {
+  if (claudeHelpCache !== null || claudeHelpProbe || !which('claude')) return;
+  claudeHelpProbe = runP('claude', ['--help'], { timeoutMs: 15000, cap: 128 * 1024, noStdin: true }).then((r) => {
+    claudeHelpCache = r && r.code === 0 ? String(r.stdout || '') : '';
+    claudeHelpProbe = null; aiModelsCache = { at: 0, data: null };   // the next request sees the real lists
+  });
+}
+function readClaudeModels() {
+  const out = { suggest: ['fable', 'opus', 'sonnet', 'haiku'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'], known: false, default: { model: '', effort: '' } };
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf8'));
+    if (st && typeof st.model === 'string') out.default.model = st.model;
+  } catch (e) {}
+  probeClaudeHelp();
+  const help = claudeHelpCache || '';
+  const ef = /--effort\s+<level>[\s\S]{0,240}?\(([a-z, ]+)\)/.exec(help);
+  if (ef) out.efforts = ef[1].split(',').map((x) => x.trim()).filter(Boolean);
+  const al = /--model\s+<model>[\s\S]{0,400}?\(e\.g\.\s*([^)]+)\)/.exec(help);
+  if (al) {
+    const names = (al[1].match(/'([A-Za-z0-9._-]+)'/g) || []).map((x) => x.replace(/'/g, ''));
+    if (names.length) out.suggest = names.concat(out.suggest.filter((n) => names.indexOf(n) === -1));
+  }
+  return out;
+}
+function readGeminiModels() {
+  const out = { suggest: ['gemini-2.5-pro', 'gemini-2.5-flash'], known: false, default: { model: '' } };
+  try {
+    const st = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.gemini', 'settings.json'), 'utf8'));
+    const m = st && st.model && (typeof st.model === 'string' ? st.model : st.model.name);
+    if (typeof m === 'string') out.default.model = m;
+  } catch (e) {}
+  return out;
+}
+app.get('/api/ai-models', (req, res) => {
+  const now = Date.now();
+  if (aiModelsCache.data && now - aiModelsCache.at < 60000 && !req.query.refresh) return res.json(aiModelsCache.data);
+  const data = { ok: true, claude: readClaudeModels(), codex: readCodexModels(), gemini: readGeminiModels() };
+  aiModelsCache = { at: now, data };
+  res.json(data);
+});
+setTimeout(probeClaudeHelp, 3000);   // warm it right after startup, off the request path
 
 app.post('/api/build', (req, res) => {
   runBuild((code) => res.json({ ok: code === 0 }));
@@ -930,7 +1016,7 @@ function tailFile(p, maxBytes, maxLines) {
 app.get('/api/diagnostics', async (req, res) => {
   const win = process.platform === 'win32';
   const line = (r) => (r && r.code === 0 ? (String(r.stdout || r.stderr || '').trim().split(/\r?\n/)[0] || '').slice(0, 120) : null);
-  const ver = (cmd, args) => (which(cmd) ? runP(cmd, args, { timeoutMs: 8000, cap: 8192 }) : Promise.resolve(null));
+  const ver = (cmd, args) => (which(cmd) ? runP(cmd, args, { timeoutMs: 8000, cap: 8192, noStdin: true }) : Promise.resolve(null));
   const isGit = fs.existsSync(path.join(REPO, '.git'));
   const [py, npm, claude, codex, gemini, head, branch, tag] = await Promise.all([
     PYTHON_OK ? runP(PY, ['--version'], { timeoutMs: 8000 }) : Promise.resolve(null),

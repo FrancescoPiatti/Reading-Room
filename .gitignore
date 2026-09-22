@@ -49,3 +49,6 @@ dist/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
 workmode/.install.lock
+
+# maintainer-only context for Claude Code (the shipped CLAUDE.md is the reader's; the builder's notes live in notes/)
+CLAUDE.local.md
