@@ -8,7 +8,7 @@ proof, follow the citation graph, export BibTeX. Everything stays local; the out
 HTML that is yours.
 
 **See what it looks like and how to use it on the website:**
-**https://francescopiatti.github.io/Reading-Room-Website/**
+**https://francescopiatti.com/Reading-Room-Website/**
 
 | ![Analyze a paper: enter it, the assistant reads it, the report builds](assets/shots/analyze.gif) | ![The app: catalogue, flows, and the terminal drawer](assets/shots/apptour.gif) |
 |---|---|
